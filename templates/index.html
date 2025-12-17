@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Smart Video Downloader</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/style.css">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+
+<body>
+<div class="container">
+    <!-- Heading with name -->
+    <h1>🎬 Smart Video Downloader <span class="name">by Ijaz Ahmad</span></h1>
+    <p class="subheading">Download YouTube & Facebook videos easily in MP4, WEBM, or MP3!</p>
+
+    <!-- URL input -->
+    <input type="text" id="url" placeholder="Paste YouTube / Facebook URL">
+
+    <!-- Format & quality -->
+    <div class="row">
+        <select id="format">
+            <option value="mp4">MP4 Video</option>
+            <option value="webm">WEBM Video</option>
+            <option value="mp3">MP3 Audio Only</option>
+        </select>
+
+        <select id="quality">
+            <option value="best">Best Quality</option>
+            <option value="bestvideo[height<=1080]+bestaudio/best">1080p</option>
+            <option value="bestvideo[height<=720]+bestaudio/best">720p</option>
+            <option value="bestvideo[height<=480]+bestaudio/best">480p</option>
+        </select>
+    </div>
+
+    <!-- Download button -->
+    <button onclick="startDownload()"><i class="fa-solid fa-download"></i> Download</button>
+
+    <!-- Progress bar -->
+    <div class="progress-box">
+        <div id="progress"></div>
+    </div>
+
+    <!-- Status message -->
+    <p id="status"></p>
+</div>
+
+<script src="/static/script.js"></script>
+</body>
+</html>

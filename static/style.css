@@ -1,0 +1,72 @@
+/* General */
+*{box-sizing:border-box;font-family:'Roboto',sans-serif;margin:0;padding:0}
+body{background:linear-gradient(135deg,#1d2671,#c33764);height:100vh;display:flex;align-items:center;justify-content:center}
+
+/* Container */
+.container{
+    background:#fff;
+    width:100%;
+    max-width:450px;
+    padding:30px 25px;
+    border-radius:15px;
+    text-align:center;
+    box-shadow:0 15px 30px rgba(0,0,0,0.3);
+    animation: fadeIn 1s ease;
+}
+
+/* Heading */
+h1{font-size:24px;margin-bottom:8px}
+h1 .name{color:#007BFF;font-weight:700;font-size:20px}
+.subheading{font-size:14px;color:#555;margin-bottom:15px}
+
+/* Input & selects */
+input,select{
+    width:100%;
+    padding:12px;
+    margin-top:10px;
+    border-radius:8px;
+    border:1px solid #ddd;
+    font-size:14px;
+}
+
+/* Row select layout */
+.row{display:flex;gap:10px;margin-top:10px}
+
+/* Button */
+button{
+    width:100%;
+    margin-top:15px;
+    padding:12px;
+    background:#007BFF;
+    color:white;
+    font-size:16px;
+    border:none;
+    border-radius:8px;
+    cursor:pointer;
+    transition: all 0.3s ease;
+}
+button:hover{background:#0056b3;transform:translateY(-2px)}
+
+/* Progress */
+.progress-box{
+    width:100%;
+    background:#eee;
+    border-radius:6px;
+    margin-top:15px;
+    overflow:hidden;
+}
+#progress{
+    height:8px;
+    width:0%;
+    background:#28a745;
+    transition: width 0.4s ease;
+}
+
+/* Status */
+#status{margin-top:10px;font-size:14px;color:#333}
+
+/* Animations */
+@keyframes fadeIn{
+    0%{opacity:0;transform:translateY(-20px)}
+    100%{opacity:1;transform:translateY(0)}
+}
