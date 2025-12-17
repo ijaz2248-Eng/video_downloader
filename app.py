@@ -1,9 +1,7 @@
 from flask import Flask, render_template, request, jsonify, send_file
 import yt_dlp
-import os
-import time
+import os, time, threading, requests
 from collections import defaultdict
-import threading
 
 app = Flask(__name__)
 
@@ -31,6 +29,17 @@ def delete_file_later(path, delay=60):
             os.remove(path)
     threading.Thread(target=delete).start()
 
+# ===== CAPTCHA Verification =====
+def verify_captcha(token):
+    secret_key = "6Ld5ay4sAAAAAHsmqRhd31pNmaw6vEhVqsHzR7d-"
+    url = "https://www.google.com/recaptcha/api/siteverify"
+    data = {"secret": secret_key, "response": token}
+    try:
+        response = requests.post(url, data=data).json()
+        return response.get("success", False)
+    except:
+        return False
+
 # ===== ROUTES =====
 @app.route("/")
 def index():
@@ -46,9 +55,15 @@ def download():
     url = data.get("url")
     quality = data.get("quality")
     format_type = data.get("format")
+    captcha_response = data.get("captcha") or ""  # Always get a string
 
     if not url:
         return jsonify({"error": "Invalid URL"}), 400
+
+    # Verify CAPTCHA only if token is provided
+    if captcha_response:
+        if not verify_captcha(captcha_response):
+            return jsonify({"error": "CAPTCHA verification failed"}), 403
 
     try:
         ydl_opts = {}
@@ -75,7 +90,6 @@ def download():
         return jsonify({"success": True, "file": filename})
 
     except yt_dlp.utils.DownloadError as e:
-        # Handle restricted videos
         if "Sign in" in str(e) or "age restricted" in str(e):
             return jsonify({"error": "This video cannot be downloaded (restricted or login required)."}), 403
         return jsonify({"error": str(e)}), 500
@@ -89,8 +103,6 @@ def serve_file():
     delete_file_later(path, delay=60)
     return send_file(path, as_attachment=True)
 
-# ===== RUN APP =====
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
