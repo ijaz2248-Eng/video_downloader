@@ -51,6 +51,7 @@ def download():
         return jsonify({"error": "Invalid URL"}), 400
 
     try:
+        ydl_opts = {}
         if format_type == "mp3":
             ydl_opts = {
                 "format": "bestaudio/best",
@@ -68,12 +69,15 @@ def download():
             }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url)
+            info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
 
         return jsonify({"success": True, "file": filename})
 
-    except Exception as e:
+    except yt_dlp.utils.DownloadError as e:
+        # Handle restricted videos
+        if "Sign in" in str(e) or "age restricted" in str(e):
+            return jsonify({"error": "This video cannot be downloaded (restricted or login required)."}), 403
         return jsonify({"error": str(e)}), 500
 
 @app.route("/file")
@@ -82,12 +86,11 @@ def serve_file():
     if not path or not os.path.exists(path):
         return "File not found", 404
 
-    # Schedule deletion after 60 seconds
     delete_file_later(path, delay=60)
     return send_file(path, as_attachment=True)
 
 # ===== RUN APP =====
 if __name__ == "__main__":
     import os
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
