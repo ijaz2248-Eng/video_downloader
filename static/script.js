@@ -10,19 +10,36 @@ function startDownload(){
         return;
     }
 
+    // Validate CAPTCHA if visible
+    const captchaResponse = grecaptcha.getResponse();
+    if(document.getElementById("captcha-box").style.display === "block" && !captchaResponse){
+        status.innerText = "❌ Please verify that you are not a robot";
+        return;
+    }
+
     progress.style.width = "30%";
     status.innerText = "⏳ Processing...";
 
     fetch("/download",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({url, quality, format})
+        body: JSON.stringify({
+            url: url,
+            quality: quality,
+            format: format,
+            captcha: captchaResponse || ""
+        })
     })
     .then(res => res.json())
     .then(data => {
         if(data.error){
             status.innerText = "❌ "+data.error;
             progress.style.width = "0%";
+
+            // Show CAPTCHA for restricted videos
+            if(data.error.includes("restricted") || data.error.includes("login required")){
+                document.getElementById("captcha-box").style.display = "block";
+            }
         }else{
             progress.style.width = "100%";
             status.innerText = "✅ Download ready!";

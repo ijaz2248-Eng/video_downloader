@@ -37,6 +37,11 @@
     <!-- Download button -->
     <button onclick="startDownload()"><i class="fa-solid fa-download"></i> Download</button>
 
+    <!-- CAPTCHA for restricted videos -->
+    <div id="captcha-box" style="display:none; margin-top:15px;">
+        <div class="g-recaptcha" data-sitekey="6Ld5ay4sAAAAABOfdNM08n0fQljI5-qdOU87Tvcn"></div>
+    </div>
+
     <!-- Progress bar -->
     <div class="progress-box">
         <div id="progress"></div>
@@ -46,6 +51,7 @@
     <p id="status"></p>
 </div>
 
+<script src="https://www.google.com/recaptcha/api.js" async defer></script>
 <script src="/static/script.js"></script>
 </body>
 </html>
