@@ -4,71 +4,55 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Smart Video Downloader</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
   <div class="bg"></div>
 
   <main class="wrap">
     <header class="hero">
-      <div class="badge">⚡ Smart Video Downloader</div>
-      <h1>Download videos in multiple qualities</h1>
-      <p class="sub">
-        Paste a public video link and get available formats instantly.
-      </p>
-
-      <div class="platforms">
-        <span class="pill yt">YouTube</span>
-        <span class="pill fb">Facebook</span>
-        <span class="pill ig">Instagram</span>
-        <span class="pill tk">TikTok</span>
+      <div class="logo">⬇️</div>
+      <div>
+        <h1>Smart Video Downloader</h1>
+        <p>Download public videos from <b>YouTube</b>, <b>Facebook</b>, <b>Instagram</b> & <b>TikTok</b> in multiple qualities.</p>
+        <div class="chips">
+          <span class="chip">Public links only</span>
+          <span class="chip">Multiple formats</span>
+          <span class="chip">Fast download</span>
+        </div>
       </div>
     </header>
 
     <section class="card">
-      <div class="form">
-        <label for="url">Video URL</label>
-        <div class="row">
-          <input id="url" placeholder="Paste link here..." autocomplete="off" />
-          <button id="btnFetch" class="primary">
-            <span class="btnText">Get formats</span>
-            <span class="spinner hidden" aria-hidden="true"></span>
-          </button>
-        </div>
-        <div class="hint">
-          Tip: public links work best. Some links may be blocked by the platform.
-        </div>
+      <label class="label">Video URL</label>
+      <div class="row">
+        <input id="url" class="input" placeholder="Paste a YouTube / Facebook / Instagram / TikTok link…" />
+        <button id="btn" class="btn">Get formats</button>
       </div>
 
-      <div id="alert" class="alert hidden"></div>
-
-      <div id="meta" class="meta hidden">
-        <img id="thumb" class="thumb" alt="thumbnail" />
-        <div class="metaText">
-          <div id="title" class="title"></div>
-          <a id="openLink" class="openLink" target="_blank" rel="noreferrer">Open original</a>
-        </div>
-      </div>
-
-      <div id="results" class="results hidden">
-        <div class="tabs">
-          <button class="tab active" data-tab="progressive">Video + Audio</button>
-          <button class="tab" data-tab="video_only">Video only</button>
-          <button class="tab" data-tab="audio_only">Audio only</button>
-        </div>
-
-        <div id="list" class="list"></div>
-      </div>
-
-      <footer class="footer">
-        <span>Made by <strong>Ijaz Ahmad</strong></span>
-        <span class="dot">•</span>
-        <span>Hosted on Render</span>
-      </footer>
+      <div id="status" class="status hidden"></div>
     </section>
+
+    <section id="result" class="card hidden">
+      <div class="media">
+        <img id="thumb" class="thumb hidden" alt="thumbnail" />
+        <div class="meta">
+          <div id="title" class="title"></div>
+          <a id="src" class="src" href="#" target="_blank" rel="noreferrer">Open source</a>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="toolbar-title">Available formats</div>
+        <button id="clear" class="btn ghost">Clear</button>
+      </div>
+
+      <div id="formats" class="formats"></div>
+    </section>
+
+    <footer class="foot">
+      <span>Made by Ijaz Ahmad • Hosted on Render</span>
+    </footer>
   </main>
 
   <script src="/static/app.js"></script>
