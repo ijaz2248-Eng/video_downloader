@@ -1,180 +1,71 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Smart Video Downloader</title>
-  <script src="https://www.google.com/recaptcha/api.js" async defer></script>
-  <style>
-    body{font-family:Arial,Helvetica,sans-serif;background:#5b2b73;margin:0;padding:0}
-    .card{max-width:520px;margin:40px auto;background:#fff;border-radius:14px;padding:22px;box-shadow:0 12px 30px rgba(0,0,0,.2)}
-    h2{margin:0 0 6px}
-    .muted{color:#555;margin:0 0 16px}
-    input{width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;font-size:15px}
-    button{width:100%;margin-top:12px;padding:12px;border:0;border-radius:10px;font-size:16px;cursor:pointer}
-    .primary{background:#0d6efd;color:#fff}
-    .danger{background:#dc3545;color:#fff}
-    .row{display:flex;gap:10px;margin-top:10px}
-    .row button{width:50%}
-    .error{color:#b00020;margin-top:10px}
-    .ok{color:#0a7a2f;margin-top:10px}
-    .fmt{border:1px solid #eee;border-radius:10px;padding:10px;margin-top:10px}
-    .fmt button{margin-top:8px}
-    img{max-width:100%;border-radius:10px}
-  </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
-  <div class="card">
-    <h2>Smart Video Downloader by Ijaz Ahmad</h2>
-    <p class="muted">Public videos only (YouTube/Facebook). Login-required videos cannot be downloaded from a public hosted backend without user-provided cookies.</p>
+  <div class="bg"></div>
 
-    <input id="url" placeholder="Paste video link (YouTube/Facebook)"/>
-    <button class="primary" onclick="extract()">Download</button>
-
-    {% if recaptcha_enabled %}
-      <div style="margin-top:12px">
-        <div class="g-recaptcha" data-sitekey="{{ site_key }}"></div>
+  <main class="container">
+    <header class="header">
+      <div class="logo">⬇️</div>
+      <div>
+        <h1>Smart Video Downloader</h1>
+        <p class="sub">
+          Download <b>YouTube</b>, <b>Facebook</b>, <b>Instagram</b> & <b>TikTok</b> public videos.
+        </p>
       </div>
-    {% endif %}
+    </header>
 
-    <div id="msg" class=""></div>
-    <div id="preview"></div>
-    <div id="formats"></div>
-
-    <div class="row">
-      <button class="danger" onclick="clearAll()">Clear</button>
-      <button onclick="resetCaptcha()">Retry</button>
-    </div>
-  </div>
-
-<script>
-function setMsg(text, ok=false){
-  const el = document.getElementById('msg');
-  el.className = ok ? 'ok' : 'error';
-  el.textContent = text || '';
-}
-
-function getToken(){
-  {% if recaptcha_enabled %}
-  try { return grecaptcha.getResponse(); } catch(e){ return ""; }
-  {% else %}
-  return "";
-  {% endif %}
-}
-
-function resetCaptcha(){
-  {% if recaptcha_enabled %}
-  try { grecaptcha.reset(); } catch(e){}
-  {% endif %}
-  setMsg("");
-}
-
-function clearAll(){
-  document.getElementById('url').value = '';
-  document.getElementById('preview').innerHTML = '';
-  document.getElementById('formats').innerHTML = '';
-  resetCaptcha();
-}
-
-async function extract(){
-  const url = document.getElementById('url').value.trim();
-  if(!url){ setMsg("Please paste a video URL."); return; }
-
-  const token = getToken();
-  {% if recaptcha_enabled %}
-  if(!token){ setMsg("Verification expired. Check the checkbox again."); return; }
-  {% endif %}
-
-  setMsg("Extracting formats…", true);
-  document.getElementById('formats').innerHTML = '';
-
-  const res = await fetch('/api/extract', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({url, recaptchaToken: token})
-  });
-
-  const data = await res.json().catch(()=> ({}));
-  if(!data.ok){
-    setMsg(data.error || "Failed.");
-    if(data.details) console.log(data.details);
-    return;
-  }
-
-  setMsg("Select a format to download", true);
-
-  const prev = document.getElementById('preview');
-  prev.innerHTML = `
-    <div style="margin-top:12px">
-      ${data.thumbnail ? `<img src="${data.thumbnail}" alt="thumbnail"/>` : ""}
-      <div style="margin-top:8px;font-weight:bold">${data.title || ""}</div>
-    </div>
-  `;
-
-  const wrap = document.getElementById('formats');
-  data.formats.forEach(f=>{
-    const label = [
-      f.ext,
-      f.resolution || (f.is_audio ? "audio" : ""),
-      f.fps ? (f.fps + "fps") : "",
-      f.tbr ? (Math.round(f.tbr) + "kbps") : "",
-      f.format_note || ""
-    ].filter(Boolean).join(" • ");
-
-    const box = document.createElement('div');
-    box.className = 'fmt';
-    box.innerHTML = `
-      <div><b>${label}</b></div>
-      <div style="color:#666;font-size:13px;margin-top:4px">
-        vcodec: ${f.vcodec} | acodec: ${f.acodec} | id: ${f.format_id}
+    <section class="card">
+      <label class="label">Video URL</label>
+      <div class="row">
+        <input id="url" class="input" placeholder="Paste a video link…" autocomplete="off" />
+        <button id="btnFetch" class="btn primary">Get formats</button>
       </div>
-      <button class="primary">Download this</button>
-    `;
-    box.querySelector('button').onclick = ()=> downloadFormat(url, f.format_id);
-    wrap.appendChild(box);
-  });
-}
 
-async function downloadFormat(url, format_id){
-  const token = getToken();
-  {% if recaptcha_enabled %}
-  if(!token){ setMsg("Verification expired. Check the checkbox again."); return; }
-  {% endif %}
+      <div class="hint">
+        Tip: Works best with public links. Login-only/private videos may fail.
+      </div>
 
-  setMsg("Preparing download…", true);
+      <div id="status" class="status hidden"></div>
+    </section>
 
-  const res = await fetch('/api/download', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({url, format_id, recaptchaToken: token})
-  });
+    <section id="result" class="card hidden">
+      <div class="resultTop">
+        <img id="thumb" class="thumb" alt="" />
+        <div class="meta">
+          <div class="badge" id="platformBadge">Video</div>
+          <h2 id="title" class="title">—</h2>
+          <div class="actions">
+            <button id="btnClear" class="btn ghost">Clear</button>
+          </div>
+        </div>
+      </div>
 
-  // If server returned JSON error
-  const contentType = res.headers.get('content-type') || '';
-  if(contentType.includes('application/json')){
-    const data = await res.json().catch(()=> ({}));
-    setMsg(data.error || "Download failed.");
-    if(data.details) console.log(data.details);
-    return;
-  }
+      <div class="tabs">
+        <button class="tab active" data-tab="progressive">Video (with audio)</button>
+        <button class="tab" data-tab="video_only">Video only</button>
+        <button class="tab" data-tab="audio_only">Audio only</button>
+      </div>
 
-  // Otherwise it's a file download
-  const blob = await res.blob();
-  const a = document.createElement('a');
-  const link = window.URL.createObjectURL(blob);
-  a.href = link;
+      <div id="lists">
+        <div class="list" data-list="progressive"></div>
+        <div class="list hidden" data-list="video_only"></div>
+        <div class="list hidden" data-list="audio_only"></div>
+      </div>
+    </section>
 
-  // Try to read filename from header
-  const cd = res.headers.get('content-disposition') || '';
-  const match = cd.match(/filename="(.+?)"/);
-  a.download = match ? match[1] : 'video';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.URL.revokeObjectURL(link);
+    <footer class="footer">
+      <span>Made by Ijaz Ahmad</span>
+      <span class="dot">•</span>
+      <span>Hosted on Render</span>
+    </footer>
+  </main>
 
-  setMsg("Download started.", true);
-}
-</script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

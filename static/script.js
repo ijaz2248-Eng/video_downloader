@@ -1,142 +1,141 @@
-const $ = (id) => document.getElementById(id);
+const urlEl = document.getElementById("url");
+const btnFetch = document.getElementById("btnFetch");
+const statusEl = document.getElementById("status");
+const resultEl = document.getElementById("result");
+const titleEl = document.getElementById("title");
+const thumbEl = document.getElementById("thumb");
+const platformBadge = document.getElementById("platformBadge");
+const btnClear = document.getElementById("btnClear");
 
-function setMsg(text, kind="info") {
-  const el = $("msg");
-  el.className = "msg " + kind;
-  el.textContent = text || "";
+const listsWrap = document.getElementById("lists");
+const listEls = {
+  progressive: document.querySelector('[data-list="progressive"]'),
+  video_only: document.querySelector('[data-list="video_only"]'),
+  audio_only: document.querySelector('[data-list="audio_only"]'),
+};
+
+const tabs = Array.from(document.querySelectorAll(".tab"));
+
+function setStatus(msg, isError=false){
+  statusEl.classList.remove("hidden");
+  statusEl.classList.toggle("error", isError);
+  statusEl.textContent = msg;
+}
+function clearStatus(){
+  statusEl.classList.add("hidden");
+  statusEl.classList.remove("error");
+  statusEl.textContent = "";
 }
 
-function getRecaptchaToken() {
-  if (!window.APP_ENABLE_RECAPTCHA) return "";
-  if (typeof grecaptcha === "undefined") return "";
-  // For v2 checkbox, token is in hidden textarea named g-recaptcha-response
-  const t = document.querySelector("textarea[name='g-recaptcha-response']");
-  return (t && t.value) ? t.value.trim() : "";
+function escapeHtml(s){
+  return (s||"").replace(/[&<>"']/g, m => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"
+  }[m]));
 }
 
-function resetRecaptcha() {
-  if (!window.APP_ENABLE_RECAPTCHA) return;
-  if (typeof grecaptcha === "undefined") return;
-  try { grecaptcha.reset(); } catch (e) {}
+function formatLabel(f){
+  const res = f.resolution || "—";
+  const ext = (f.ext || "").toUpperCase();
+  const fps = f.fps ? `${f.fps}fps` : "";
+  const size = f.filesize_h || "";
+  const v = f.vcodec && f.vcodec !== "none" ? f.vcodec : "";
+  const a = f.acodec && f.acodec !== "none" ? f.acodec : "";
+  const note = f.format_note || "";
+  return { res, ext, fps, size, v, a, note };
 }
 
-function hideResult() {
-  $("result").classList.add("hidden");
-  $("formats").innerHTML = "";
+function buildItem(url, f){
+  const {res, ext, fps, size, v, a, note} = formatLabel(f);
+  const line1 = `${res} ${note ? "• " + note : ""}`.trim();
+  const line2parts = [];
+  if (ext) line2parts.push(ext);
+  if (fps) line2parts.push(fps);
+  if (size) line2parts.push(size);
+  if (v) line2parts.push(`v:${v}`);
+  if (a) line2parts.push(`a:${a}`);
+  const line2 = line2parts.join(" • ");
+
+  const downloadUrl = `/download?url=${encodeURIComponent(url)}&format_id=${encodeURIComponent(f.format_id)}`;
+
+  const div = document.createElement("div");
+  div.className = "item";
+  div.innerHTML = `
+    <div class="itemLeft">
+      <div class="line1">${escapeHtml(line1)} <span class="pill">${escapeHtml(f.format_id)}</span></div>
+      <div class="line2">${escapeHtml(line2 || " ")}</div>
+    </div>
+    <a class="btn downloadBtn" href="${downloadUrl}">Download</a>
+  `;
+  return div;
 }
 
-function showResult(title, thumb, formats) {
-  $("title").textContent = title || "";
-  const img = $("thumb");
-  if (thumb) {
-    img.src = thumb;
-    img.style.display = "block";
-  } else {
-    img.style.display = "none";
+function renderList(url, key, items){
+  const el = listEls[key];
+  el.innerHTML = "";
+  if (!items || items.length === 0){
+    const empty = document.createElement("div");
+    empty.className = "status";
+    empty.textContent = "No formats found in this category.";
+    el.appendChild(empty);
+    return;
   }
+  items.forEach(f => el.appendChild(buildItem(url, f)));
+}
 
-  const wrap = $("formats");
-  wrap.innerHTML = "";
-
-  formats.forEach(f => {
-    const btn = document.createElement("button");
-    btn.className = "fmt";
-    btn.innerHTML = `<div class="lbl">${f.label}</div>
-                     <div class="sub">${f.format_id}</div>`;
-    btn.onclick = () => startDownload(f.format_id);
-    wrap.appendChild(btn);
+function setActiveTab(tabKey){
+  tabs.forEach(t => t.classList.toggle("active", t.dataset.tab === tabKey));
+  Object.entries(listEls).forEach(([k, el]) => {
+    el.classList.toggle("hidden", k !== tabKey);
   });
-
-  $("result").classList.remove("hidden");
 }
 
-async function fetchInfo() {
-  hideResult();
-  setMsg("");
+tabs.forEach(t => t.addEventListener("click", () => setActiveTab(t.dataset.tab)));
 
-  const url = $("url").value.trim();
-  if (!url) return setMsg("Please paste a video URL.", "err");
+btnClear.addEventListener("click", () => {
+  urlEl.value = "";
+  resultEl.classList.add("hidden");
+  clearStatus();
+});
 
-  const recaptcha = getRecaptchaToken();
-  if (window.APP_ENABLE_RECAPTCHA && !recaptcha) {
-    return setMsg("Verification expired. Check the checkbox again.", "err");
-  }
+btnFetch.addEventListener("click", async () => {
+  const url = (urlEl.value || "").trim();
+  if (!url) return setStatus("Please paste a video URL.", true);
 
-  $("btnInfo").disabled = true;
-  setMsg("Fetching formats...", "info");
+  clearStatus();
+  setStatus("Fetching formats…");
 
-  try {
-    const r = await fetch("/api/info", {
+  try{
+    const res = await fetch("/info", {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ url, recaptcha })
+      body: JSON.stringify({url})
     });
-    const data = await r.json();
+    const data = await res.json();
 
-    if (!data.ok) {
-      setMsg(data.error || "Failed.", "err");
-      // if server says token is expired, force user to re-check
-      resetRecaptcha();
+    if (!data.ok){
+      setStatus(data.error || "Failed to fetch formats.", true);
+      resultEl.classList.add("hidden");
       return;
     }
 
-    setMsg("Formats loaded. Choose one below.", "ok");
-    showResult(data.title, data.thumbnail, data.formats);
-    // reset checkbox after successful action so next request gets a fresh token
-    resetRecaptcha();
-
-  } catch (e) {
-    setMsg("Network error. Try again.", "err");
-    resetRecaptcha();
-  } finally {
-    $("btnInfo").disabled = false;
-  }
-}
-
-function startDownload(format_id) {
-  const url = $("url").value.trim();
-  const recaptcha = getRecaptchaToken();
-
-  if (window.APP_ENABLE_RECAPTCHA && !recaptcha) {
-    return setMsg("Verification expired. Check the checkbox again, then click the format.", "err");
-  }
-
-  setMsg("Starting download...", "info");
-
-  fetch("/api/download", {
-    method: "POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({ url, format_id, recaptcha })
-  }).then(async (res) => {
-    if (!res.ok) {
-      let j = null;
-      try { j = await res.json(); } catch {}
-      setMsg((j && j.error) ? j.error : "Download failed.", "err");
-      resetRecaptcha();
-      return;
+    platformBadge.textContent = data.platform || "Video";
+    titleEl.textContent = data.title || "Untitled";
+    if (data.thumbnail){
+      thumbEl.src = data.thumbnail;
+      thumbEl.style.display = "";
+    } else {
+      thumbEl.style.display = "none";
     }
 
-    // Stream file
-    const blob = await res.blob();
-    const a = document.createElement("a");
-    const dlUrl = window.URL.createObjectURL(blob);
-    a.href = dlUrl;
+    renderList(url, "progressive", data.progressive);
+    renderList(url, "video_only", data.video_only);
+    renderList(url, "audio_only", data.audio_only);
 
-    // try get filename from headers
-    const cd = res.headers.get("Content-Disposition") || "";
-    const m = cd.match(/filename="(.+?)"/);
-    a.download = m ? m[1] : "video";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.URL.revokeObjectURL(dlUrl);
-
-    setMsg("Download started.", "ok");
-    resetRecaptcha();
-  }).catch(() => {
-    setMsg("Network error. Try again.", "err");
-    resetRecaptcha();
-  });
-}
-
-$("btnInfo").addEventListener("click", fetchInfo);
+    resultEl.classList.remove("hidden");
+    setActiveTab("progressive");
+    clearStatus();
+  }catch(e){
+    setStatus("Server error. Please try again.\n\n" + e, true);
+    resultEl.classList.add("hidden");
+  }
+});
