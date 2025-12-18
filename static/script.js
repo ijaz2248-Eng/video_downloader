@@ -1,53 +1,72 @@
-function startDownload(){
+function startDownload() {
     const url = document.getElementById("url").value;
-    const quality = document.getElementById("quality").value;
-    const format = document.getElementById("format").value;
     const status = document.getElementById("status");
     const progress = document.getElementById("progress");
+    const formatsBox = document.getElementById("formats-box");
 
-    if(!url){
+    if (!url) {
         status.innerText = "❌ Please enter a URL";
         return;
     }
 
-    // Validate CAPTCHA if visible
-    const captchaResponse = grecaptcha.getResponse();
-    if(document.getElementById("captcha-box").style.display === "block" && !captchaResponse){
-        status.innerText = "❌ Please verify that you are not a robot";
-        return;
-    }
+    progress.style.width = "20%";
+    status.innerText = "🔍 Fetching formats...";
+    formatsBox.style.display = "none";
+    formatsBox.innerHTML = "";
 
-    progress.style.width = "30%";
-    status.innerText = "⏳ Processing...";
-
-    fetch("/download",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({
-            url: url,
-            quality: quality,
-            format: format,
-            captcha: captchaResponse || ""
-        })
+    fetch("/formats", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({url})
     })
     .then(res => res.json())
     .then(data => {
-        if(data.error){
-            status.innerText = "❌ "+data.error;
+        if (data.error) {
+            status.innerText = "❌ " + data.error;
             progress.style.width = "0%";
-
-            // Show CAPTCHA for restricted videos
-            if(data.error.includes("restricted") || data.error.includes("login required")){
-                document.getElementById("captcha-box").style.display = "block";
-            }
-        }else{
-            progress.style.width = "100%";
-            status.innerText = "✅ Download ready!";
-            window.location = "/file?path="+encodeURIComponent(data.file);
+            return;
         }
+
+        progress.style.width = "50%";
+        status.innerText = "✅ Select a format";
+
+        formatsBox.style.display = "block";
+
+        data.formats.forEach(f => {
+            const btn = document.createElement("button");
+            btn.style.marginTop = "8px";
+            btn.innerHTML = `${f.ext.toUpperCase()} | ${f.resolution} | ${f.filesize} MB`;
+            btn.onclick = () => downloadSelected(url, f.format_id);
+            formatsBox.appendChild(btn);
+        });
     })
-    .catch(()=>{
+    .catch(() => {
         status.innerText = "❌ Server error";
         progress.style.width = "0%";
+    });
+}
+
+function downloadSelected(url, format_id) {
+    const status = document.getElementById("status");
+    const progress = document.getElementById("progress");
+
+    progress.style.width = "70%";
+    status.innerText = "⬇ Downloading...";
+
+    fetch("/download", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({url, format_id})
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.error) {
+            status.innerText = "❌ " + data.error;
+            progress.style.width = "0%";
+        } else {
+            progress.style.width = "100%";
+            status.innerText = "✅ Download ready!";
+            window.location = "/file?path=" + encodeURIComponent(data.file);
+        }
     });
 }
