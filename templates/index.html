@@ -4,60 +4,94 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Smart Video Downloader</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body>
-  <div class="bg"></div>
 
-  <main class="wrap">
-    <header class="hero">
+<body>
+  <div class="bg-orb orb1"></div>
+  <div class="bg-orb orb2"></div>
+
+  <header class="topbar">
+    <div class="brand">
       <div class="logo">⬇️</div>
       <div>
-        <h1>Smart Video Downloader</h1>
-        <p class="sub">
-          Download public videos from <b>YouTube</b>, <b>Facebook</b>, <b>Instagram</b> & <b>TikTok</b>.
-        </p>
-        <p class="note">
-          Works best with public links. Some platforms may block cloud servers for certain videos.
-        </p>
+        <div class="title">Smart Video Downloader</div>
+        <div class="subtitle">YouTube • Facebook • Instagram • TikTok (public links)</div>
       </div>
-    </header>
+    </div>
+    <div class="badge">Hosted on Render</div>
+  </header>
 
-    <section class="card">
-      <label class="label">Video URL</label>
-      <div class="row">
-        <input id="url" class="input" placeholder="Paste a video link..." />
-        <button id="btn" class="btn">Get formats</button>
-      </div>
+  <main class="wrap">
+    <section class="card hero">
+      <div class="hero-left">
+        <h1>Download public videos in multiple qualities</h1>
+        <p class="muted">
+          Paste a link, fetch available formats, then download video/audio.
+        </p>
 
-      <div id="status" class="status"></div>
-
-      <div id="videoBox" class="videoBox hidden">
-        <img id="thumb" class="thumb" alt="thumbnail" />
-        <div class="meta">
-          <div id="title" class="title">—</div>
-          <a id="openLink" class="open" target="_blank" rel="noreferrer">Open original</a>
+        <div class="input-row">
+          <div class="input">
+            <label for="videoUrl">Video URL</label>
+            <input id="videoUrl" type="url" placeholder="Paste a video link..." autocomplete="off">
+          </div>
+          <button id="btnFormats" class="btn primary">
+            <span class="btn-text">Get formats</span>
+            <span class="spinner" aria-hidden="true"></span>
+          </button>
         </div>
-      </div>
 
-      <div class="toolbar hidden" id="toolbar">
         <div class="chips">
-          <button class="chip active" data-filter="all">All</button>
-          <button class="chip" data-filter="video+audio">Video+Audio</button>
-          <button class="chip" data-filter="video">Video only</button>
-          <button class="chip" data-filter="audio">Audio only</button>
+          <span class="chip">Fast</span>
+          <span class="chip">Mobile-friendly</span>
+          <span class="chip">Auto-cleanup</span>
         </div>
-        <button id="clear" class="btn2">Clear</button>
+
+        <div id="toast" class="toast" role="status" aria-live="polite"></div>
       </div>
 
-      <div id="list" class="list"></div>
+      <div class="hero-right">
+        <div class="preview">
+          <div class="preview-top">
+            <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+            <span class="preview-label">Preview</span>
+          </div>
+          <div class="preview-body">
+            <div class="skeleton thumb"></div>
+            <div class="skeleton line"></div>
+            <div class="skeleton line short"></div>
+            <div class="skeleton line"></div>
+          </div>
+        </div>
+      </div>
     </section>
 
-    <footer class="foot">
-      <span>Made by Ijaz Ahmad • Hosted on Render</span>
+    <section id="resultsSection" class="card results hidden">
+      <div class="results-head">
+        <div class="video-meta">
+          <h2 id="videoTitle">Formats</h2>
+          <div id="videoInfo" class="muted small"></div>
+        </div>
+
+        <div class="filters">
+          <button class="tab active" data-tab="all">All</button>
+          <button class="tab" data-tab="video">Video</button>
+          <button class="tab" data-tab="audio">Audio</button>
+          <button id="btnClear" class="btn ghost">Clear</button>
+        </div>
+      </div>
+
+      <div id="formatsGrid" class="grid"></div>
+    </section>
+
+    <footer class="footer muted">
+      Made by <b>Ijaz Ahmad</b> • Public videos only • Login/private links may fail
     </footer>
   </main>
 
-  <script src="/static/script.js"></script>
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

@@ -1,136 +1,228 @@
-const urlEl = document.getElementById("url");
-const btn = document.getElementById("btn");
-const statusEl = document.getElementById("status");
-const listEl = document.getElementById("list");
-const clearBtn = document.getElementById("clear");
+(() => {
+  const $ = (id) => document.getElementById(id);
 
-const videoBox = document.getElementById("videoBox");
-const thumbEl = document.getElementById("thumb");
-const titleEl = document.getElementById("title");
-const openLinkEl = document.getElementById("openLink");
-const toolbar = document.getElementById("toolbar");
+  const videoUrl = $("videoUrl");
+  const btnFormats = $("btnFormats");
+  const btnClear = $("btnClear");
+  const toast = $("toast");
 
-let lastUrl = "";
-let allFormats = [];
-let activeFilter = "all";
+  const resultsSection = $("resultsSection");
+  const formatsGrid = $("formatsGrid");
+  const videoTitle = $("videoTitle");
+  const videoInfo = $("videoInfo");
 
-function setStatus(msg, type="") {
-  statusEl.className = "status " + type;
-  statusEl.textContent = msg || "";
-}
+  const tabs = Array.from(document.querySelectorAll(".tab"));
 
-function fmtSize(bytes){
-  if(!bytes || bytes <= 0) return "";
-  const units = ["B","KB","MB","GB"];
-  let i = 0, n = bytes;
-  while(n >= 1024 && i < units.length-1){ n /= 1024; i++; }
-  return `${n.toFixed(i===0?0:1)} ${units[i]}`;
-}
+  const FORMATS_ENDPOINT = "/api/formats";
+  const DOWNLOAD_ENDPOINT = "/download"; // <-- change if your route is different
 
-function render(){
-  listEl.innerHTML = "";
-  const shown = allFormats.filter(f => activeFilter === "all" ? true : f.kind === activeFilter);
+  let lastPayload = null;
+  let currentTab = "all";
 
-  if(shown.length === 0){
-    listEl.innerHTML = `<div class="small">No formats found for this filter.</div>`;
-    return;
+  function showToast(message, type = "ok") {
+    toast.textContent = message;
+    toast.className = `toast show ${type === "err" ? "err" : "ok"}`;
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => {
+      toast.className = "toast";
+      toast.style.display = "none";
+    }, 3500);
+    toast.style.display = "block";
   }
 
-  for(const f of shown){
-    const label = `${f.ext?.toUpperCase() || ""} • ${f.kind}`;
-    const q = f.kind === "audio"
-      ? `Audio • ${Math.round(f.tbr||0)} kbps`
-      : `Quality • ${f.height ? f.height+"p" : "—"} ${f.fps ? "• "+f.fps+"fps" : ""}`;
-
-    const size = fmtSize(f.filesize);
-
-    const a = document.createElement("a");
-    a.className = "item";
-    a.href = `/download?url=${encodeURIComponent(lastUrl)}&format_id=${encodeURIComponent(f.format_id)}`;
-    a.target = "_blank";
-    a.rel = "noreferrer";
-
-    a.innerHTML = `
-      <div class="left">
-        <div class="badge">${label}</div>
-        <div class="small">${q} • id: ${f.format_id}${size ? " • "+size : ""}</div>
-      </div>
-      <div class="dl">Download</div>
-    `;
-    listEl.appendChild(a);
-  }
-}
-
-document.querySelectorAll(".chip").forEach(chip => {
-  chip.addEventListener("click", () => {
-    document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
-    chip.classList.add("active");
-    activeFilter = chip.dataset.filter;
-    render();
-  });
-});
-
-clearBtn.addEventListener("click", () => {
-  urlEl.value = "";
-  lastUrl = "";
-  allFormats = [];
-  listEl.innerHTML = "";
-  videoBox.classList.add("hidden");
-  toolbar.classList.add("hidden");
-  setStatus("");
-});
-
-btn.addEventListener("click", async () => {
-  const url = urlEl.value.trim();
-  if(!url){
-    setStatus("Please paste a video URL.", "bad");
-    return;
+  function setLoading(isLoading) {
+    btnFormats.disabled = isLoading;
+    btnFormats.querySelector(".spinner").style.display = isLoading ? "inline-block" : "none";
+    btnFormats.querySelector(".btn-text").textContent = isLoading ? "Loading..." : "Get formats";
   }
 
-  btn.disabled = true;
-  setStatus("Fetching formats…", "");
-  listEl.innerHTML = "";
-  videoBox.classList.add("hidden");
-  toolbar.classList.add("hidden");
+  function isAudioOnly(f) {
+    // yt-dlp: vcodec == "none" => audio-only
+    return f && f.vcodec === "none" && f.acodec && f.acodec !== "none";
+  }
 
-  try{
-    const r = await fetch("/api/formats", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({url})
+  function isVideoFormat(f) {
+    // includes video-only OR video+audio
+    return f && f.vcodec && f.vcodec !== "none";
+  }
+
+  function fmtBytes(n) {
+    if (!n || isNaN(n)) return "";
+    const units = ["B", "KB", "MB", "GB"];
+    let i = 0, x = n;
+    while (x >= 1024 && i < units.length - 1) { x /= 1024; i++; }
+    return `${x.toFixed(i === 0 ? 0 : 2)} ${units[i]}`;
+  }
+
+  function formatLabel(f) {
+    const ext = f.ext ? f.ext.toUpperCase() : "FILE";
+    const h = f.height ? `${f.height}p` : "";
+    const fps = f.fps ? `${f.fps}fps` : "";
+    const abr = f.abr ? `${Math.round(f.abr)}kbps` : "";
+    const note = f.format_note || "";
+    const size = fmtBytes(f.filesize || f.filesize_approx);
+
+    const left = [ext, h, fps].filter(Boolean).join(" • ");
+    const right = [note, abr, size].filter(Boolean).join(" • ");
+    return { left, right };
+  }
+
+  function buildDownloadLink(url, formatId) {
+    const u = new URL(DOWNLOAD_ENDPOINT, window.location.origin);
+    u.searchParams.set("url", url);
+    u.searchParams.set("format_id", formatId);
+    return u.toString();
+  }
+
+  function renderFormats(payload) {
+    const url = payload._inputUrl || videoUrl.value.trim();
+    const title = payload.title || "Formats";
+    const extractor = payload.extractor_key || payload.extractor || payload.webpage_url_domain || "";
+
+    const formats = Array.isArray(payload.formats) ? payload.formats : [];
+    if (!formats.length) {
+      formatsGrid.innerHTML = "";
+      resultsSection.classList.remove("hidden");
+      videoTitle.textContent = "No formats found";
+      videoInfo.textContent = "Try another public link, or the platform may be blocking requests from hosting servers.";
+      showToast("No formats returned by server.", "err");
+      return;
+    }
+
+    // filter out weird/incomplete entries
+    const clean = formats
+      .filter(f => f && f.format_id && f.ext)
+      .filter(f => (f.filesize || f.filesize_approx || f.tbr || f.abr || f.height));
+
+    // sort by quality (height then bitrate)
+    clean.sort((a, b) => {
+      const ah = a.height || 0, bh = b.height || 0;
+      if (bh !== ah) return bh - ah;
+      const at = a.tbr || a.abr || 0, bt = b.tbr || b.abr || 0;
+      return bt - at;
     });
 
-    const data = await r.json().catch(() => null);
-    if(!data){
-      setStatus("Server returned an invalid response (not JSON). Check Render logs.", "bad");
-      return;
-    }
-    if(!r.ok || !data.ok){
-      setStatus(data.error || "Failed to fetch formats.", "bad");
-      return;
-    }
+    lastPayload = { ...payload, formats: clean, _inputUrl: url };
 
-    lastUrl = url;
-    allFormats = data.formats || [];
+    resultsSection.classList.remove("hidden");
+    videoTitle.textContent = title;
+    videoInfo.textContent = extractor ? `Source: ${extractor}` : "";
 
-    titleEl.textContent = data.title || "Video";
-    openLinkEl.href = data.webpage_url || url;
-
-    if(data.thumbnail){
-      thumbEl.src = data.thumbnail;
-      thumbEl.classList.remove("hidden");
-    } else {
-      thumbEl.src = "";
-    }
-
-    videoBox.classList.remove("hidden");
-    toolbar.classList.remove("hidden");
-    setStatus(`Found ${allFormats.length} formats.`, "good");
-    render();
-
-  } catch(e){
-    setStatus("Request failed. Check network / Render service logs.", "bad");
-  } finally{
-    btn.disabled = false;
+    applyTabFilter();
+    showToast("Formats loaded ✅", "ok");
   }
-});
+
+  function applyTabFilter() {
+    if (!lastPayload) return;
+    formatsGrid.innerHTML = "";
+
+    const url = lastPayload._inputUrl;
+    const formats = lastPayload.formats || [];
+
+    const filtered = formats.filter(f => {
+      if (currentTab === "audio") return isAudioOnly(f);
+      if (currentTab === "video") return isVideoFormat(f);
+      return true;
+    });
+
+    if (!filtered.length) {
+      formatsGrid.innerHTML = `<div class="muted small">No formats in this category.</div>`;
+      return;
+    }
+
+    const frag = document.createDocumentFragment();
+
+    filtered.forEach((f) => {
+      const { left, right } = formatLabel(f);
+
+      const card = document.createElement("div");
+      card.className = "item";
+
+      const typePill = isAudioOnly(f) ? "Audio" : (f.acodec && f.acodec !== "none" ? "Video+Audio" : "Video only");
+
+      const v = f.vcodec && f.vcodec !== "none" ? f.vcodec : "";
+      const a = f.acodec && f.acodec !== "none" ? f.acodec : "";
+
+      card.innerHTML = `
+        <div class="top">
+          <span class="pill">${typePill}</span>
+          <span class="pill">${left || "Format"}</span>
+        </div>
+        <h3>${left || (f.format_note || f.ext || "Format")}</h3>
+        <div class="meta">
+          ${right ? `<div>${right}</div>` : ""}
+          <div>${[v ? `V: ${v}` : "", a ? `A: ${a}` : ""].filter(Boolean).join(" • ")}</div>
+          <div class="small">ID: ${f.format_id}</div>
+        </div>
+        <div class="actions">
+          <a class="dl primary" href="${buildDownloadLink(url, f.format_id)}">Download</a>
+        </div>
+      `;
+
+      frag.appendChild(card);
+    });
+
+    formatsGrid.appendChild(frag);
+  }
+
+  async function fetchFormats() {
+    const url = videoUrl.value.trim();
+    if (!url) return showToast("Paste a video URL first.", "err");
+
+    setLoading(true);
+
+    try {
+      const res = await fetch(FORMATS_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+
+      const ct = res.headers.get("content-type") || "";
+      const data = ct.includes("application/json") ? await res.json() : { error: await res.text() };
+
+      if (!res.ok) {
+        throw new Error(data.error || `Request failed (${res.status})`);
+      }
+
+      // keep original url for download building
+      data._inputUrl = url;
+
+      renderFormats(data);
+    } catch (e) {
+      console.error(e);
+      showToast(e.message || "Failed to get formats.", "err");
+      resultsSection.classList.remove("hidden");
+      videoTitle.textContent = "Error";
+      videoInfo.textContent = e.message || "Could not fetch formats.";
+      formatsGrid.innerHTML = "";
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function clearAll() {
+    lastPayload = null;
+    formatsGrid.innerHTML = "";
+    resultsSection.classList.add("hidden");
+    videoTitle.textContent = "Formats";
+    videoInfo.textContent = "";
+    showToast("Cleared.", "ok");
+  }
+
+  // events
+  btnFormats.addEventListener("click", fetchFormats);
+  btnClear.addEventListener("click", clearAll);
+  videoUrl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") fetchFormats();
+  });
+
+  tabs.forEach((t) => {
+    t.addEventListener("click", () => {
+      tabs.forEach(x => x.classList.remove("active"));
+      t.classList.add("active");
+      currentTab = t.dataset.tab;
+      applyTabFilter();
+    });
+  });
+})();
