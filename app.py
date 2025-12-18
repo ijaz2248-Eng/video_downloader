@@ -1,9 +1,8 @@
 import os
-import re
 import time
 import uuid
 import threading
-from pathlib import Path
+from collections import defaultdict
 
 import requests
 from flask import Flask, render_template, request, jsonify, send_file
@@ -11,55 +10,75 @@ import yt_dlp
 
 app = Flask(__name__)
 
-BASE_DIR = Path(__file__).resolve().parent
-DOWNLOAD_FOLDER = BASE_DIR / "downloads"
-DOWNLOAD_FOLDER.mkdir(exist_ok=True)
+# -----------------------------
+# Config
+# -----------------------------
+DOWNLOAD_FOLDER = os.environ.get("DOWNLOAD_FOLDER", "downloads")
+os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-# ========= ENV VARS (Render -> Environment) =========
-ENABLE_RECAPTCHA = os.getenv("ENABLE_RECAPTCHA", "1") == "1"
-RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY", "").strip()
-RECAPTCHA_SITE_KEY = os.getenv("RECAPTCHA_SITE_KEY", "").strip()
+REQUEST_LIMIT = int(os.environ.get("REQUEST_LIMIT", "8"))
+TIME_WINDOW = int(os.environ.get("TIME_WINDOW", "300"))
+AUTO_DELETE_SECONDS = int(os.environ.get("AUTO_DELETE_SECONDS", "600"))
 
-# ========= SIMPLE RATE LIMIT (IP-based) =========
-REQUEST_LIMIT = int(os.getenv("REQUEST_LIMIT", "8"))     # per TIME_WINDOW seconds
-TIME_WINDOW = int(os.getenv("TIME_WINDOW", "300"))       # 5 minutes
-user_requests = {}
+RECAPTCHA_ENABLED = os.environ.get("RECAPTCHA_ENABLED", "true").lower() == "true"
+RECAPTCHA_SITE_KEY = os.environ.get("RECAPTCHA_SITE_KEY", "")
+RECAPTCHA_SECRET_KEY = os.environ.get("RECAPTCHA_SECRET_KEY", "")
+ALLOWED_HOSTNAMES = [
+    h.strip().lower()
+    for h in os.environ.get(
+        "RECAPTCHA_ALLOWED_HOSTNAMES",
+        "video-downloader-cdso.onrender.com,onrender.com,localhost"
+    ).split(",")
+    if h.strip()
+]
 
+user_requests = defaultdict(list)
+
+
+# -----------------------------
+# Helpers
+# -----------------------------
 def is_rate_limited(ip: str) -> bool:
     now = time.time()
-    times = user_requests.get(ip, [])
-    times = [t for t in times if now - t < TIME_WINDOW]
-    if len(times) >= REQUEST_LIMIT:
-        user_requests[ip] = times
+    user_requests[ip] = [t for t in user_requests[ip] if now - t < TIME_WINDOW]
+    if len(user_requests[ip]) >= REQUEST_LIMIT:
         return True
-    times.append(now)
-    user_requests[ip] = times
+    user_requests[ip].append(now)
     return False
 
-def delete_file_later(path: Path, delay: int = 120):
-    def worker():
+
+def delete_file_later(path: str, delay: int = AUTO_DELETE_SECONDS):
+    def _delete():
         try:
             time.sleep(delay)
-            if path.exists():
-                path.unlink()
+            if os.path.exists(path):
+                os.remove(path)
         except Exception:
             pass
-    threading.Thread(target=worker, daemon=True).start()
 
-# ========= reCAPTCHA VERIFY =========
-def verify_recaptcha(token: str, remote_ip: str) -> (bool, str):
-    """
-    Verify reCAPTCHA v2 checkbox token (g-recaptcha-response).
-    """
-    if not ENABLE_RECAPTCHA:
-        return True, "recaptcha_disabled"
+    threading.Thread(target=_delete, daemon=True).start()
 
-    if not RECAPTCHA_SECRET_KEY:
-        # If enabled but missing secret, fail clearly
-        return False, "Server reCAPTCHA is not configured (missing secret key)."
+
+def client_ip() -> str:
+    # Render/Proxies
+    xf = request.headers.get("X-Forwarded-For", "")
+    if xf:
+        return xf.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
+def verify_recaptcha(token: str):
+    """
+    Returns: (ok: bool, error_message: str)
+    """
+    if not RECAPTCHA_ENABLED:
+        return True, ""
+
+    if not (RECAPTCHA_SECRET_KEY and RECAPTCHA_SITE_KEY):
+        return False, "reCAPTCHA keys are not configured on server."
 
     if not token:
-        return False, "Verification expired. Check the checkbox again."
+        return False, "Please complete the reCAPTCHA checkbox."
 
     try:
         resp = requests.post(
@@ -67,240 +86,192 @@ def verify_recaptcha(token: str, remote_ip: str) -> (bool, str):
             data={
                 "secret": RECAPTCHA_SECRET_KEY,
                 "response": token,
-                "remoteip": remote_ip,
+                # "remoteip": client_ip(),  # optional
             },
             timeout=15,
         )
         data = resp.json()
-        if data.get("success") is True:
-            return True, "ok"
-
-        # common case: timeout-or-duplicate
-        codes = data.get("error-codes", [])
-        if "timeout-or-duplicate" in codes:
-            return False, "Verification expired. Check the checkbox again."
-        return False, f"reCAPTCHA failed: {', '.join(codes) if codes else 'unknown error'}"
     except Exception:
-        return False, "reCAPTCHA verification error. Try again."
+        return False, "reCAPTCHA verification failed (network/server error)."
 
-# ========= yt-dlp helpers =========
-RESTRICTED_PATTERNS = [
-    r"sign in",
-    r"login",
-    r"confirm you'?re not a bot",
-    r"not a robot",
-    r"this video is private",
-    r"age-restricted",
-    r"requires authentication",
-    r"requested content is not available",
-]
+    if not data.get("success"):
+        codes = data.get("error-codes", [])
+        # common: timeout-or-duplicate, invalid-input-secret, invalid-input-response
+        return False, f"reCAPTCHA failed: {', '.join(codes) if codes else 'unknown error'}"
 
-def is_restricted_error(msg: str) -> bool:
-    low = (msg or "").lower()
-    return any(re.search(p, low) for p in RESTRICTED_PATTERNS)
+    # Hostname verification (important when 'Verify the origin...' is enabled)
+    hostname = (data.get("hostname") or "").lower().strip()
+    if hostname and hostname not in ALLOWED_HOSTNAMES:
+        return False, f"reCAPTCHA hostname mismatch: {hostname}"
+
+    return True, ""
+
 
 def ydl_base_opts():
-    """
-    Safe-ish defaults for public extraction.
-    Note: We do NOT provide bypass instructions for login/CAPTCHA.
-    """
+    # Keep options conservative for hosted environments
     return {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        "geo_bypass": True,
         "nocheckcertificate": True,
-        "socket_timeout": 20,
-        "retries": 2,
-        "fragment_retries": 2,
-        "consoletitle": False,
-        "http_headers": {
-            # Helps avoid some basic blocks; not a CAPTCHA bypass.
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            )
-        },
-        # Prefer not to download huge by default; we only extract info in /api/info
-        "skip_download": True,
+        # If you want extra debugging:
+        # "verbose": True,
     }
 
-def normalize_formats(info: dict):
-    formats = info.get("formats") or []
+
+def extract_info(url: str):
+    opts = ydl_base_opts()
+    opts.update({"skip_download": True})
+
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        return ydl.extract_info(url, download=False)
+
+
+def simplify_formats(info: dict):
+    fmts = info.get("formats") or []
     out = []
 
-    for f in formats:
-        # Keep only useful formats (video/audio)
-        if f.get("url") is None:
+    for f in fmts:
+        # Skip broken entries
+        if not f.get("format_id"):
             continue
 
-        fmt_id = f.get("format_id")
-        ext = f.get("ext")
-        acodec = f.get("acodec")
         vcodec = f.get("vcodec")
-        height = f.get("height") or 0
-        fps = f.get("fps") or 0
-        abr = f.get("abr") or 0
-        vbr = f.get("vbr") or 0
-        tbr = f.get("tbr") or 0
-        filesize = f.get("filesize") or f.get("filesize_approx") or 0
+        acodec = f.get("acodec")
 
-        # classify
-        is_audio_only = (vcodec == "none" and acodec != "none")
-        is_video = (vcodec != "none")
+        is_video = vcodec and vcodec != "none"
+        is_audio = acodec and acodec != "none"
 
-        label_parts = []
-        if is_audio_only:
-            label_parts.append("AUDIO")
-            if abr:
-                label_parts.append(f"{int(abr)}kbps")
-        elif is_video:
-            label_parts.append("VIDEO")
-            if height:
-                label_parts.append(f"{height}p")
-            if fps:
-                label_parts.append(f"{int(fps)}fps")
-            if vbr:
-                label_parts.append(f"v{int(vbr)}kbps")
-        if ext:
-            label_parts.append(ext.upper())
+        # Only show useful types
+        if not (is_video or is_audio):
+            continue
 
         out.append({
-            "format_id": fmt_id,
-            "ext": ext,
-            "height": height,
-            "fps": fps,
-            "tbr": tbr,
-            "filesize": filesize,
-            "is_audio_only": is_audio_only,
-            "label": " • ".join(label_parts) if label_parts else (f.get("format") or fmt_id),
+            "format_id": f.get("format_id"),
+            "ext": f.get("ext"),
+            "resolution": f.get("resolution") or (f"{f.get('width','?')}x{f.get('height','?')}" if f.get("width") else None),
+            "height": f.get("height"),
+            "fps": f.get("fps"),
+            "vcodec": vcodec,
+            "acodec": acodec,
+            "filesize": f.get("filesize") or f.get("filesize_approx"),
+            "tbr": f.get("tbr"),
+            "abr": f.get("abr"),
+            "format_note": f.get("format_note"),
+            "is_video": bool(is_video),
+            "is_audio": bool(is_audio),
         })
 
-    # Sort: video desc by height then bitrate, audio desc by abr
-    def sort_key(x):
-        if x["is_audio_only"]:
-            return (0, 0, x["tbr"] or 0)
-        return (1, x["height"] or 0, x["tbr"] or 0)
-
-    out.sort(key=sort_key, reverse=True)
+    # Sort: best height then bitrate
+    out.sort(key=lambda x: (x["height"] or 0, x["tbr"] or 0), reverse=True)
     return out
 
-@app.get("/")
+
+# -----------------------------
+# Routes
+# -----------------------------
+@app.route("/")
 def index():
     return render_template(
         "index.html",
-        recaptcha_site_key=RECAPTCHA_SITE_KEY if ENABLE_RECAPTCHA else "",
-        enable_recaptcha=ENABLE_RECAPTCHA,
+        site_key=RECAPTCHA_SITE_KEY,
+        recaptcha_enabled=RECAPTCHA_ENABLED
     )
 
-@app.post("/api/info")
-def api_info():
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr) or "unknown"
+
+@app.route("/api/extract", methods=["POST"])
+def api_extract():
+    ip = client_ip()
     if is_rate_limited(ip):
-        return jsonify({"ok": False, "error": "Too many requests. Try again in a few minutes."}), 429
+        return jsonify({"ok": False, "error": "Too many requests. Please wait a few minutes."}), 429
 
-    url = (request.json or {}).get("url", "").strip()
-    token = (request.json or {}).get("recaptcha", "").strip()
+    data = request.get_json(force=True) or {}
+    url = (data.get("url") or "").strip()
+    token = (data.get("recaptchaToken") or "").strip()
 
-    ok, msg = verify_recaptcha(token, ip)
+    ok, msg = verify_recaptcha(token)
     if not ok:
-        return jsonify({"ok": False, "error": msg, "need_recaptcha": True}), 400
+        return jsonify({"ok": False, "error": msg}), 400
 
     if not url:
         return jsonify({"ok": False, "error": "Please paste a video URL."}), 400
 
-    ydl_opts = ydl_base_opts()
-
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-
-        title = info.get("title") or "video"
+        info = extract_info(url)
+        title = info.get("title") or "Video"
         thumbnail = info.get("thumbnail")
-        formats = normalize_formats(info)
-
+        formats = simplify_formats(info)
         if not formats:
-            return jsonify({"ok": False, "error": "No downloadable formats found for this URL."}), 400
+            return jsonify({"ok": False, "error": "No downloadable formats found (maybe restricted or blocked)."}), 400
 
         return jsonify({
             "ok": True,
             "title": title,
             "thumbnail": thumbnail,
-            "formats": formats,
+            "formats": formats
         })
-
+    except yt_dlp.utils.DownloadError as e:
+        # Most common for restricted/login/bot-check
+        return jsonify({
+            "ok": False,
+            "error": "Restricted/login/bot-check detected. Public hosted site may fail for this URL.",
+            "details": str(e)[:500]
+        }), 400
     except Exception as e:
-        err = str(e)
-        if is_restricted_error(err):
-            return jsonify({
-                "ok": False,
-                "restricted": True,
-                "error": (
-                    "Restricted/login detected. This hosted app can only download PUBLIC videos. "
-                    "If the video requires login, cookies are needed (upload/paste), or use official access."
-                )
-            }), 400
-        return jsonify({"ok": False, "error": f"Extraction failed: {err}"}), 400
+        return jsonify({"ok": False, "error": "Server error while extracting formats.", "details": str(e)[:500]}), 500
 
-@app.post("/api/download")
+
+@app.route("/api/download", methods=["POST"])
 def api_download():
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr) or "unknown"
+    ip = client_ip()
     if is_rate_limited(ip):
-        return jsonify({"ok": False, "error": "Too many requests. Try again in a few minutes."}), 429
+        return jsonify({"ok": False, "error": "Too many requests. Please wait a few minutes."}), 429
 
-    url = (request.json or {}).get("url", "").strip()
-    fmt = (request.json or {}).get("format_id", "").strip()
-    token = (request.json or {}).get("recaptcha", "").strip()
+    data = request.get_json(force=True) or {}
+    url = (data.get("url") or "").strip()
+    format_id = (data.get("format_id") or "").strip()
+    token = (data.get("recaptchaToken") or "").strip()
 
-    ok, msg = verify_recaptcha(token, ip)
+    ok, msg = verify_recaptcha(token)
     if not ok:
-        return jsonify({"ok": False, "error": msg, "need_recaptcha": True}), 400
+        return jsonify({"ok": False, "error": msg}), 400
 
-    if not url or not fmt:
-        return jsonify({"ok": False, "error": "Missing URL or format."}), 400
+    if not url or not format_id:
+        return jsonify({"ok": False, "error": "Missing URL or format id."}), 400
 
-    file_id = uuid.uuid4().hex
-    outtmpl = str(DOWNLOAD_FOLDER / f"{file_id}.%(ext)s")
-
-    ydl_opts = {
-        **ydl_base_opts(),
-        "skip_download": False,
-        "format": fmt,
-        "outtmpl": outtmpl,
-        "merge_output_format": "mp4",
-    }
+    file_id = str(uuid.uuid4())
+    outtmpl = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.%(ext)s")
 
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        opts = ydl_base_opts()
+        opts.update({
+            "format": format_id,
+            "outtmpl": outtmpl,
+            "merge_output_format": "mp4",
+        })
+
+        with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
+            # Determine final file path
+            filename = ydl.prepare_filename(info)
+            if not os.path.exists(filename):
+                # merged file may change extension
+                base = os.path.splitext(filename)[0]
+                for ext in ("mp4", "mkv", "webm", "mp3", "m4a"):
+                    candidate = base + "." + ext
+                    if os.path.exists(candidate):
+                        filename = candidate
+                        break
 
-        # find produced file
-        # yt-dlp resolves actual extension; search for matching prefix
-        produced = None
-        for p in DOWNLOAD_FOLDER.glob(f"{file_id}.*"):
-            produced = p
-            break
-
-        if not produced or not produced.exists():
-            return jsonify({"ok": False, "error": "Download failed (file not created)."}), 400
-
-        delete_file_later(produced, delay=180)
-
-        # A cleaner filename for user
-        title = (info.get("title") or "video").strip()
-        safe_title = re.sub(r'[\\/*?:"<>|]+', "_", title)[:90]
-        download_name = f"{safe_title}.{produced.suffix.lstrip('.')}"
-        return send_file(produced, as_attachment=True, download_name=download_name)
-
+        delete_file_later(filename)
+        safe_name = (info.get("title") or "video").replace("/", "_").replace("\\", "_")
+        return send_file(filename, as_attachment=True, download_name=f"{safe_name}{os.path.splitext(filename)[1]}")
+    except yt_dlp.utils.DownloadError as e:
+        return jsonify({
+            "ok": False,
+            "error": "Download failed (restricted/login/bot-check or extractor issue).",
+            "details": str(e)[:500]
+        }), 400
     except Exception as e:
-        err = str(e)
-        if is_restricted_error(err):
-            return jsonify({
-                "ok": False,
-                "restricted": True,
-                "error": (
-                    "Restricted/login detected. This hosted app can only download PUBLIC videos. "
-                    "If login is required, cookies are needed (upload/paste) or use official access."
-                )
-            }), 400
-        return jsonify({"ok": False, "error": f"Download failed: {err}"}), 400
+        return jsonify({"ok": False, "error": "Server error while downloading.", "details": str(e)[:500]}), 500

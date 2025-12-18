@@ -1,49 +1,180 @@
 <!doctype html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Smart Video Downloader</title>
-  <link rel="stylesheet" href="/static/style.css" />
-  {% if enable_recaptcha and recaptcha_site_key %}
   <script src="https://www.google.com/recaptcha/api.js" async defer></script>
-  {% endif %}
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;background:#5b2b73;margin:0;padding:0}
+    .card{max-width:520px;margin:40px auto;background:#fff;border-radius:14px;padding:22px;box-shadow:0 12px 30px rgba(0,0,0,.2)}
+    h2{margin:0 0 6px}
+    .muted{color:#555;margin:0 0 16px}
+    input{width:100%;padding:12px;border:1px solid #ddd;border-radius:10px;font-size:15px}
+    button{width:100%;margin-top:12px;padding:12px;border:0;border-radius:10px;font-size:16px;cursor:pointer}
+    .primary{background:#0d6efd;color:#fff}
+    .danger{background:#dc3545;color:#fff}
+    .row{display:flex;gap:10px;margin-top:10px}
+    .row button{width:50%}
+    .error{color:#b00020;margin-top:10px}
+    .ok{color:#0a7a2f;margin-top:10px}
+    .fmt{border:1px solid #eee;border-radius:10px;padding:10px;margin-top:10px}
+    .fmt button{margin-top:8px}
+    img{max-width:100%;border-radius:10px}
+  </style>
 </head>
 <body>
   <div class="card">
-    <h1>Smart Video Downloader <span>by Ijaz Ahmad</span></h1>
-    <p class="sub">Public videos only (YouTube/Facebook). If a video requires login, this hosted site cannot auto-detect your cookies.</p>
+    <h2>Smart Video Downloader by Ijaz Ahmad</h2>
+    <p class="muted">Public videos only (YouTube/Facebook). Login-required videos cannot be downloaded from a public hosted backend without user-provided cookies.</p>
 
-    <div class="row">
-      <input id="url" type="text" placeholder="Paste video URL..." />
-      <button id="btnInfo">Download</button>
-    </div>
+    <input id="url" placeholder="Paste video link (YouTube/Facebook)"/>
+    <button class="primary" onclick="extract()">Download</button>
 
-    <div id="msg" class="msg"></div>
-
-    {% if enable_recaptcha and recaptcha_site_key %}
-      <div class="captchaBox">
-        <div class="g-recaptcha" data-sitekey="{{ recaptcha_site_key }}"></div>
-        <div class="hint">If you see “Verification expired”, tick the checkbox again, then press Download.</div>
+    {% if recaptcha_enabled %}
+      <div style="margin-top:12px">
+        <div class="g-recaptcha" data-sitekey="{{ site_key }}"></div>
       </div>
     {% endif %}
 
-    <div id="result" class="result hidden">
-      <div class="meta">
-        <img id="thumb" alt="" />
-        <div>
-          <div id="title" class="title"></div>
-          <div class="small">Select a format to download</div>
-        </div>
-      </div>
+    <div id="msg" class=""></div>
+    <div id="preview"></div>
+    <div id="formats"></div>
 
-      <div id="formats" class="formats"></div>
+    <div class="row">
+      <button class="danger" onclick="clearAll()">Clear</button>
+      <button onclick="resetCaptcha()">Retry</button>
     </div>
   </div>
 
-  <script>
-    window.APP_ENABLE_RECAPTCHA = {{ "true" if enable_recaptcha else "false" }};
-  </script>
-  <script src="/static/app.js"></script>
+<script>
+function setMsg(text, ok=false){
+  const el = document.getElementById('msg');
+  el.className = ok ? 'ok' : 'error';
+  el.textContent = text || '';
+}
+
+function getToken(){
+  {% if recaptcha_enabled %}
+  try { return grecaptcha.getResponse(); } catch(e){ return ""; }
+  {% else %}
+  return "";
+  {% endif %}
+}
+
+function resetCaptcha(){
+  {% if recaptcha_enabled %}
+  try { grecaptcha.reset(); } catch(e){}
+  {% endif %}
+  setMsg("");
+}
+
+function clearAll(){
+  document.getElementById('url').value = '';
+  document.getElementById('preview').innerHTML = '';
+  document.getElementById('formats').innerHTML = '';
+  resetCaptcha();
+}
+
+async function extract(){
+  const url = document.getElementById('url').value.trim();
+  if(!url){ setMsg("Please paste a video URL."); return; }
+
+  const token = getToken();
+  {% if recaptcha_enabled %}
+  if(!token){ setMsg("Verification expired. Check the checkbox again."); return; }
+  {% endif %}
+
+  setMsg("Extracting formats…", true);
+  document.getElementById('formats').innerHTML = '';
+
+  const res = await fetch('/api/extract', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({url, recaptchaToken: token})
+  });
+
+  const data = await res.json().catch(()=> ({}));
+  if(!data.ok){
+    setMsg(data.error || "Failed.");
+    if(data.details) console.log(data.details);
+    return;
+  }
+
+  setMsg("Select a format to download", true);
+
+  const prev = document.getElementById('preview');
+  prev.innerHTML = `
+    <div style="margin-top:12px">
+      ${data.thumbnail ? `<img src="${data.thumbnail}" alt="thumbnail"/>` : ""}
+      <div style="margin-top:8px;font-weight:bold">${data.title || ""}</div>
+    </div>
+  `;
+
+  const wrap = document.getElementById('formats');
+  data.formats.forEach(f=>{
+    const label = [
+      f.ext,
+      f.resolution || (f.is_audio ? "audio" : ""),
+      f.fps ? (f.fps + "fps") : "",
+      f.tbr ? (Math.round(f.tbr) + "kbps") : "",
+      f.format_note || ""
+    ].filter(Boolean).join(" • ");
+
+    const box = document.createElement('div');
+    box.className = 'fmt';
+    box.innerHTML = `
+      <div><b>${label}</b></div>
+      <div style="color:#666;font-size:13px;margin-top:4px">
+        vcodec: ${f.vcodec} | acodec: ${f.acodec} | id: ${f.format_id}
+      </div>
+      <button class="primary">Download this</button>
+    `;
+    box.querySelector('button').onclick = ()=> downloadFormat(url, f.format_id);
+    wrap.appendChild(box);
+  });
+}
+
+async function downloadFormat(url, format_id){
+  const token = getToken();
+  {% if recaptcha_enabled %}
+  if(!token){ setMsg("Verification expired. Check the checkbox again."); return; }
+  {% endif %}
+
+  setMsg("Preparing download…", true);
+
+  const res = await fetch('/api/download', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({url, format_id, recaptchaToken: token})
+  });
+
+  // If server returned JSON error
+  const contentType = res.headers.get('content-type') || '';
+  if(contentType.includes('application/json')){
+    const data = await res.json().catch(()=> ({}));
+    setMsg(data.error || "Download failed.");
+    if(data.details) console.log(data.details);
+    return;
+  }
+
+  // Otherwise it's a file download
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  const link = window.URL.createObjectURL(blob);
+  a.href = link;
+
+  // Try to read filename from header
+  const cd = res.headers.get('content-disposition') || '';
+  const match = cd.match(/filename="(.+?)"/);
+  a.download = match ? match[1] : 'video';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(link);
+
+  setMsg("Download started.", true);
+}
+</script>
 </body>
 </html>
