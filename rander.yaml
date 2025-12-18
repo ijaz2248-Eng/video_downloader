@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: smart-video-downloader
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: ENABLE_RECAPTCHA
+        value: "1"
+      - key: REQUEST_LIMIT
+        value: "8"
+      - key: TIME_WINDOW
+        value: "300"
+      # Add RECAPTCHA_SITE_KEY + RECAPTCHA_SECRET_KEY in Render dashboard securely

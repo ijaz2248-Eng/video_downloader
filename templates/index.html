@@ -1,39 +1,49 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Smart Video Downloader</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="/static/style.css">
-<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Smart Video Downloader</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  {% if enable_recaptcha and recaptcha_site_key %}
+  <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+  {% endif %}
 </head>
-
 <body>
-<div class="container">
-    <h1>🎬 Smart Video Downloader <span class="name">by Ijaz Ahmad</span></h1>
-    <p class="subheading">Download YouTube & Facebook videos easily in MP4, WEBM, or MP3!</p>
+  <div class="card">
+    <h1>Smart Video Downloader <span>by Ijaz Ahmad</span></h1>
+    <p class="sub">Public videos only (YouTube/Facebook). If a video requires login, this hosted site cannot auto-detect your cookies.</p>
 
-    <input type="text" id="url" placeholder="Paste YouTube / Facebook URL">
-
-    <button onclick="startDownload()"><i class="fa-solid fa-download"></i> Download</button>
-
-    <!-- CAPTCHA for restricted videos -->
-    <div id="captcha-box" style="display:none; margin-top:15px;">
-        <div class="g-recaptcha" data-sitekey="6Ld5ay4sAAAAABOfdNM08n0fQljI5-qdOU87Tvcn"></div>
+    <div class="row">
+      <input id="url" type="text" placeholder="Paste video URL..." />
+      <button id="btnInfo">Download</button>
     </div>
 
-    <div class="progress-box">
-        <div id="progress"></div>
+    <div id="msg" class="msg"></div>
+
+    {% if enable_recaptcha and recaptcha_site_key %}
+      <div class="captchaBox">
+        <div class="g-recaptcha" data-sitekey="{{ recaptcha_site_key }}"></div>
+        <div class="hint">If you see “Verification expired”, tick the checkbox again, then press Download.</div>
+      </div>
+    {% endif %}
+
+    <div id="result" class="result hidden">
+      <div class="meta">
+        <img id="thumb" alt="" />
+        <div>
+          <div id="title" class="title"></div>
+          <div class="small">Select a format to download</div>
+        </div>
+      </div>
+
+      <div id="formats" class="formats"></div>
     </div>
+  </div>
 
-    <p id="status"></p>
-
-    <!-- Formats appear here -->
-    <div id="formats-box" style="display:none; margin-top:15px;"></div>
-</div>
-
-<script src="https://www.google.com/recaptcha/api.js" async defer></script>
-<script src="/static/script.js"></script>
+  <script>
+    window.APP_ENABLE_RECAPTCHA = {{ "true" if enable_recaptcha else "false" }};
+  </script>
+  <script src="/static/app.js"></script>
 </body>
 </html>
