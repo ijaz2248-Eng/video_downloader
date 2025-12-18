@@ -1,6 +1,9 @@
 from flask import Flask, render_template, request, jsonify, send_file
 import yt_dlp
-import os, time, threading, requests
+import os
+import time
+import threading
+import requests
 from collections import defaultdict
 
 app = Flask(__name__)
@@ -8,9 +11,9 @@ app = Flask(__name__)
 DOWNLOAD_FOLDER = "downloads"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-# ================= RATE LIMIT =================
+# ===== RATE LIMITING =====
 REQUEST_LIMIT = 5
-TIME_WINDOW = 300
+TIME_WINDOW = 300  # 5 minutes
 user_requests = defaultdict(list)
 
 def is_rate_limited(ip):
@@ -21,92 +24,75 @@ def is_rate_limited(ip):
     user_requests[ip].append(now)
     return False
 
-# ================= AUTO DELETE =================
-def delete_file_later(path, delay=60):
+# ===== AUTO DELETE FILES =====
+def delete_file_later(path, delay=120):
     def delete():
         time.sleep(delay)
         if os.path.exists(path):
             os.remove(path)
     threading.Thread(target=delete, daemon=True).start()
 
-# ================= CAPTCHA =================
+# ===== CAPTCHA Verification =====
 def verify_captcha(token):
-    SECRET_KEY = "6Ld5ay4sAAAAAHsmqRhd31pNmaw6vEhVqsHzR7d-"
+    secret_key = "6Ld5ay4sAAAAAHsmqRhd31pNmaw6vEhVqsHzR7d-"
+    url = "https://www.google.com/recaptcha/api/siteverify"
+    data = {"secret": secret_key, "response": token}
     try:
-        res = requests.post(
-            "https://www.google.com/recaptcha/api/siteverify",
-            data={"secret": SECRET_KEY, "response": token},
-            timeout=5
-        ).json()
-        return res.get("success", False)
+        response = requests.post(url, data=data, timeout=10).json()
+        return response.get("success", False)
     except:
         return False
 
-# ================= ROUTES =================
+# ===== ROUTES =====
 @app.route("/")
 def index():
     return render_template("index.html")
 
-# ---------- FORMAT LIST ----------
+# ---------- FORMATS (Public videos) ----------
 @app.route("/formats", methods=["POST"])
-def formats():
-    data = request.json
+def get_formats():
+    data = request.json or {}
     url = data.get("url")
 
     if not url:
         return jsonify({"error": "Invalid URL"}), 400
 
     try:
-        ydl_opts = {"quiet": True, "skip_download": True}
+        ydl_opts = {
+            "quiet": True,
+            "skip_download": True,
+            "noplaylist": True
+        }
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
-        video_formats = []
-        audio_formats = []
-
+        formats = []
         for f in info.get("formats", []):
             size = f.get("filesize") or f.get("filesize_approx")
             if not size:
                 continue
 
-            size_mb = round(size / 1024 / 1024, 2)
-
-            # ---------- AUDIO ----------
-            if f.get("vcodec") == "none" and f.get("acodec") != "none":
-                audio_formats.append({
-                    "format_id": f.get("format_id"),
-                    "ext": f.get("ext"),
-                    "bitrate": f.get("abr") or 0,
-                    "filesize": size_mb
-                })
-
-            # ---------- VIDEO ----------
-            elif f.get("vcodec") != "none":
-                video_formats.append({
-                    "format_id": f.get("format_id"),
-                    "ext": f.get("ext"),
-                    "resolution": f.get("resolution") or f.get("format_note"),
-                    "filesize": size_mb
-                })
-
-        # Sorting
-        video_formats.sort(key=lambda x: (
-            int("".join(filter(str.isdigit, str(x["resolution"]))) or 0)
-        ), reverse=True)
-
-        audio_formats.sort(key=lambda x: x["bitrate"], reverse=True)
+            formats.append({
+                "format_id": f.get("format_id"),
+                "ext": f.get("ext"),
+                "resolution": f.get("resolution") or f.get("format_note"),
+                "filesize": round(size / 1024 / 1024, 2),
+                "vcodec": f.get("vcodec"),
+                "acodec": f.get("acodec"),
+                "abr": f.get("abr") or 0
+            })
 
         return jsonify({
             "title": info.get("title"),
             "thumbnail": info.get("thumbnail"),
-            "video": video_formats,
-            "audio": audio_formats
+            "formats": formats
         })
 
-    except Exception:
+    except:
         return jsonify({
             "restricted": True,
-            "message": "Restricted video. CAPTCHA required."
+            "error": "Restricted/login detected. Complete CAPTCHA and retry."
         }), 403
 
 # ---------- DOWNLOAD ----------
@@ -114,24 +100,27 @@ def formats():
 def download():
     ip = request.remote_addr
     if is_rate_limited(ip):
-        return jsonify({"error": "Too many requests"}), 429
+        return jsonify({"error": "Too many requests. Try again later."}), 429
 
-    data = request.json
+    data = request.json or {}
     url = data.get("url")
     format_id = data.get("format_id")
-    captcha = data.get("captcha", "")
+    captcha_response = data.get("captcha", "")
 
     if not url or not format_id:
         return jsonify({"error": "Invalid request"}), 400
 
-    # CAPTCHA only when provided
-    if captcha and not verify_captcha(captcha):
-        return jsonify({"error": "CAPTCHA verification failed"}), 403
+    # Verify CAPTCHA only if token is provided
+    if captcha_response:
+        if not verify_captcha(captcha_response):
+            return jsonify({"error": "CAPTCHA verification failed"}), 403
 
     try:
         ydl_opts = {
             "format": format_id,
-            "outtmpl": f"{DOWNLOAD_FOLDER}/%(title)s.%(ext)s"
+            "outtmpl": f"{DOWNLOAD_FOLDER}/%(title)s.%(ext)s",
+            "noplaylist": True,
+            "quiet": True
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -141,14 +130,15 @@ def download():
         return jsonify({"success": True, "file": filename})
 
     except yt_dlp.utils.DownloadError as e:
-        return jsonify({
-            "restricted": True,
-            "message": "Login / age restricted. CAPTCHA required."
-        }), 403
+        if "Sign in" in str(e) or "age restricted" in str(e):
+            return jsonify({
+                "restricted": True,
+                "error": "Restricted/login detected. Complete CAPTCHA and retry."
+            }), 403
+        return jsonify({"error": "Download failed"}), 500
 
-# ---------- FILE ----------
 @app.route("/file")
-def file():
+def serve_file():
     path = request.args.get("path")
     if not path or not os.path.exists(path):
         return "File not found", 404
@@ -156,7 +146,6 @@ def file():
     delete_file_later(path)
     return send_file(path, as_attachment=True)
 
-# ================= RUN =================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)

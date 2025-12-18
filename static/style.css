@@ -1,6 +1,6 @@
 /* General */
 *{box-sizing:border-box;font-family:'Roboto',sans-serif;margin:0;padding:0}
-body{background:linear-gradient(135deg,#1d2671,#c33764);height:100vh;display:flex;align-items:center;justify-content:center}
+body{background:linear-gradient(135deg,#1d2671,#c33764);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
 
 /* Container */
 .container{
@@ -65,22 +65,17 @@ button:hover{background:#0056b3;transform:translateY(-2px)}
 /* Status */
 #status{margin-top:10px;font-size:14px;color:#333}
 
+/* Formats box */
+#formats-box{
+    margin-top:15px;
+    text-align:left;
+}
+#formats-box h3{
+    margin-top:12px;
+}
+
 /* Animations */
 @keyframes fadeIn{
     0%{opacity:0;transform:translateY(-20px)}
     100%{opacity:1;transform:translateY(0)}
-}
-#formats-box button {
-    background: #f1f1f1;
-    color: #000;
-    border-radius: 6px;
-    padding: 10px;
-    width: 100%;
-    border: none;
-    cursor: pointer;
-}
-
-#formats-box button:hover {
-    background: #007BFF;
-    color: white;
 }
