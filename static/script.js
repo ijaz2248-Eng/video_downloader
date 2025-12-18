@@ -1,130 +1,136 @@
-const $ = (id) => document.getElementById(id);
+const urlEl = document.getElementById("url");
+const btn = document.getElementById("btn");
+const statusEl = document.getElementById("status");
+const listEl = document.getElementById("list");
+const clearBtn = document.getElementById("clear");
 
-function fmtBytes(n){
-  if(!n) return "";
+const videoBox = document.getElementById("videoBox");
+const thumbEl = document.getElementById("thumb");
+const titleEl = document.getElementById("title");
+const openLinkEl = document.getElementById("openLink");
+const toolbar = document.getElementById("toolbar");
+
+let lastUrl = "";
+let allFormats = [];
+let activeFilter = "all";
+
+function setStatus(msg, type="") {
+  statusEl.className = "status " + type;
+  statusEl.textContent = msg || "";
+}
+
+function fmtSize(bytes){
+  if(!bytes || bytes <= 0) return "";
   const units = ["B","KB","MB","GB"];
-  let i=0, v=n;
-  while(v>=1024 && i<units.length-1){ v/=1024; i++; }
-  return `${v.toFixed(i===0?0:1)} ${units[i]}`;
+  let i = 0, n = bytes;
+  while(n >= 1024 && i < units.length-1){ n /= 1024; i++; }
+  return `${n.toFixed(i===0?0:1)} ${units[i]}`;
 }
 
-function formatLabel(f){
-  const h = f.height ? `${f.height}p` : "audio/unknown";
-  const ext = f.ext || "";
-  const note = f.format_note ? ` • ${f.format_note}` : "";
-  return `${h} • ${ext}${note}`;
+function render(){
+  listEl.innerHTML = "";
+  const shown = allFormats.filter(f => activeFilter === "all" ? true : f.kind === activeFilter);
+
+  if(shown.length === 0){
+    listEl.innerHTML = `<div class="small">No formats found for this filter.</div>`;
+    return;
+  }
+
+  for(const f of shown){
+    const label = `${f.ext?.toUpperCase() || ""} • ${f.kind}`;
+    const q = f.kind === "audio"
+      ? `Audio • ${Math.round(f.tbr||0)} kbps`
+      : `Quality • ${f.height ? f.height+"p" : "—"} ${f.fps ? "• "+f.fps+"fps" : ""}`;
+
+    const size = fmtSize(f.filesize);
+
+    const a = document.createElement("a");
+    a.className = "item";
+    a.href = `/download?url=${encodeURIComponent(lastUrl)}&format_id=${encodeURIComponent(f.format_id)}`;
+    a.target = "_blank";
+    a.rel = "noreferrer";
+
+    a.innerHTML = `
+      <div class="left">
+        <div class="badge">${label}</div>
+        <div class="small">${q} • id: ${f.format_id}${size ? " • "+size : ""}</div>
+      </div>
+      <div class="dl">Download</div>
+    `;
+    listEl.appendChild(a);
+  }
 }
 
-function badges(f){
-  const b = [];
-  if (f.vcodec && f.vcodec !== "none") b.push(`v: ${f.vcodec}`);
-  if (f.acodec && f.acodec !== "none") b.push(`a: ${f.acodec}`);
-  if (f.fps) b.push(`${f.fps} fps`);
-  if (f.tbr) b.push(`${Math.round(f.tbr)} kbps`);
-  if (f.filesize) b.push(fmtBytes(f.filesize));
-  return b;
-}
+document.querySelectorAll(".chip").forEach(chip => {
+  chip.addEventListener("click", () => {
+    document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+    chip.classList.add("active");
+    activeFilter = chip.dataset.filter;
+    render();
+  });
+});
 
-function setStatus(msg, isError=false){
-  const el = $("status");
-  el.classList.remove("hidden");
-  el.textContent = msg;
-  el.style.borderColor = isError ? "rgba(255,90,90,.55)" : "rgba(255,255,255,.12)";
-}
+clearBtn.addEventListener("click", () => {
+  urlEl.value = "";
+  lastUrl = "";
+  allFormats = [];
+  listEl.innerHTML = "";
+  videoBox.classList.add("hidden");
+  toolbar.classList.add("hidden");
+  setStatus("");
+});
 
-function clearAll(){
-  $("result").classList.add("hidden");
-  $("formats").innerHTML = "";
-  $("title").textContent = "";
-  $("thumb").classList.add("hidden");
-  $("src").href = "#";
-  $("status").classList.add("hidden");
-}
+btn.addEventListener("click", async () => {
+  const url = urlEl.value.trim();
+  if(!url){
+    setStatus("Please paste a video URL.", "bad");
+    return;
+  }
 
-$("clear").addEventListener("click", clearAll);
-
-$("btn").addEventListener("click", async () => {
-  const url = $("url").value.trim();
-  if(!url){ setStatus("Please paste a video URL.", true); return; }
-
-  $("btn").disabled = true;
-  setStatus("Fetching formats…");
+  btn.disabled = true;
+  setStatus("Fetching formats…", "");
+  listEl.innerHTML = "";
+  videoBox.classList.add("hidden");
+  toolbar.classList.add("hidden");
 
   try{
-    const res = await fetch("/api/formats", {
+    const r = await fetch("/api/formats", {
       method: "POST",
-      headers: {"Content-Type":"application/json"},
+      headers: {"Content-Type": "application/json"},
       body: JSON.stringify({url})
     });
 
-    const data = await res.json().catch(() => null);
-    if(!data || !data.ok){
-      const msg = (data && data.error) ? data.error : `Request failed (${res.status}).`;
-      setStatus(msg, true);
-      $("btn").disabled = false;
+    const data = await r.json().catch(() => null);
+    if(!data){
+      setStatus("Server returned an invalid response (not JSON). Check Render logs.", "bad");
+      return;
+    }
+    if(!r.ok || !data.ok){
+      setStatus(data.error || "Failed to fetch formats.", "bad");
       return;
     }
 
-    $("result").classList.remove("hidden");
-    $("title").textContent = data.title || "";
-    if (data.thumbnail){
-      $("thumb").src = data.thumbnail;
-      $("thumb").classList.remove("hidden");
-    }
-    $("src").href = data.webpage_url || url;
+    lastUrl = url;
+    allFormats = data.formats || [];
 
-    const list = $("formats");
-    list.innerHTML = "";
+    titleEl.textContent = data.title || "Video";
+    openLinkEl.href = data.webpage_url || url;
 
-    if(!data.formats || data.formats.length === 0){
-      setStatus("No formats returned. This usually means the extractor failed for this link.", true);
-      $("btn").disabled = false;
-      return;
+    if(data.thumbnail){
+      thumbEl.src = data.thumbnail;
+      thumbEl.classList.remove("hidden");
+    } else {
+      thumbEl.src = "";
     }
 
-    data.formats.forEach((f) => {
-      const div = document.createElement("div");
-      div.className = "item";
+    videoBox.classList.remove("hidden");
+    toolbar.classList.remove("hidden");
+    setStatus(`Found ${allFormats.length} formats.`, "good");
+    render();
 
-      const left = document.createElement("div");
-      left.className = "left";
-
-      const main = document.createElement("div");
-      main.style.fontWeight = "700";
-      main.textContent = formatLabel(f);
-
-      const bd = document.createElement("div");
-      bd.className = "badges";
-      badges(f).forEach(x => {
-        const s = document.createElement("span");
-        s.className = "badge";
-        s.textContent = x;
-        bd.appendChild(s);
-      });
-
-      left.appendChild(main);
-      left.appendChild(bd);
-
-      const right = document.createElement("div");
-      right.className = "right";
-
-      const a = document.createElement("a");
-      a.className = "btn";
-      a.style.textDecoration = "none";
-      a.textContent = "Download";
-      a.href = `/api/download?url=${encodeURIComponent(url)}&format_id=${encodeURIComponent(f.format_id)}`;
-
-      right.appendChild(a);
-
-      div.appendChild(left);
-      div.appendChild(right);
-      list.appendChild(div);
-    });
-
-    setStatus(`Found ${data.formats.length} formats.`);
   } catch(e){
-    setStatus(String(e), true);
+    setStatus("Request failed. Check network / Render service logs.", "bad");
   } finally{
-    $("btn").disabled = false;
+    btn.disabled = false;
   }
 });

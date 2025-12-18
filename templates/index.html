@@ -14,40 +14,43 @@
       <div class="logo">⬇️</div>
       <div>
         <h1>Smart Video Downloader</h1>
-        <p>Download public videos from <b>YouTube</b>, <b>Facebook</b>, <b>Instagram</b> & <b>TikTok</b> in multiple qualities.</p>
-        <div class="chips">
-          <span class="chip">Public links only</span>
-          <span class="chip">Multiple formats</span>
-          <span class="chip">Fast download</span>
-        </div>
+        <p class="sub">
+          Download public videos from <b>YouTube</b>, <b>Facebook</b>, <b>Instagram</b> & <b>TikTok</b>.
+        </p>
+        <p class="note">
+          Works best with public links. Some platforms may block cloud servers for certain videos.
+        </p>
       </div>
     </header>
 
     <section class="card">
       <label class="label">Video URL</label>
       <div class="row">
-        <input id="url" class="input" placeholder="Paste a YouTube / Facebook / Instagram / TikTok link…" />
+        <input id="url" class="input" placeholder="Paste a video link..." />
         <button id="btn" class="btn">Get formats</button>
       </div>
 
-      <div id="status" class="status hidden"></div>
-    </section>
+      <div id="status" class="status"></div>
 
-    <section id="result" class="card hidden">
-      <div class="media">
-        <img id="thumb" class="thumb hidden" alt="thumbnail" />
+      <div id="videoBox" class="videoBox hidden">
+        <img id="thumb" class="thumb" alt="thumbnail" />
         <div class="meta">
-          <div id="title" class="title"></div>
-          <a id="src" class="src" href="#" target="_blank" rel="noreferrer">Open source</a>
+          <div id="title" class="title">—</div>
+          <a id="openLink" class="open" target="_blank" rel="noreferrer">Open original</a>
         </div>
       </div>
 
-      <div class="toolbar">
-        <div class="toolbar-title">Available formats</div>
-        <button id="clear" class="btn ghost">Clear</button>
+      <div class="toolbar hidden" id="toolbar">
+        <div class="chips">
+          <button class="chip active" data-filter="all">All</button>
+          <button class="chip" data-filter="video+audio">Video+Audio</button>
+          <button class="chip" data-filter="video">Video only</button>
+          <button class="chip" data-filter="audio">Audio only</button>
+        </div>
+        <button id="clear" class="btn2">Clear</button>
       </div>
 
-      <div id="formats" class="formats"></div>
+      <div id="list" class="list"></div>
     </section>
 
     <footer class="foot">
@@ -55,6 +58,6 @@
     </footer>
   </main>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/script.js"></script>
 </body>
 </html>
