@@ -1,206 +1,145 @@
-const el = (id) => document.getElementById(id);
+const urlEl = document.getElementById("url");
+const btn = document.getElementById("btnFetch");
+const btnText = btn.querySelector(".btnText");
+const spinner = btn.querySelector(".spinner");
 
-const videoUrl = el("videoUrl");
-const btnFormats = el("btnFormats");
-const alertBox = el("alertBox");
+const alertBox = document.getElementById("alert");
 
-const previewCard = el("previewCard");
-const thumb = el("thumb");
-const videoTitle = el("videoTitle");
-const metaLine = el("metaLine");
+const meta = document.getElementById("meta");
+const thumb = document.getElementById("thumb");
+const titleEl = document.getElementById("title");
+const openLink = document.getElementById("openLink");
 
-const formatsWrap = el("formatsWrap");
-const formatsList = el("formatsList");
-const countLabel = el("countLabel");
+const results = document.getElementById("results");
+const list = document.getElementById("list");
+const tabs = Array.from(document.querySelectorAll(".tab"));
 
-const filterAll = el("filterAll");
-const filterVideoAudio = el("filterVideoAudio");
-const filterVideoOnly = el("filterVideoOnly");
-const filterAudioOnly = el("filterAudioOnly");
-const btnClear = el("btnClear");
+let lastData = null;
+let activeTab = "progressive";
 
-let allFormats = [];
-let lastUrl = "";
-let currentFilter = "all";
-
-function showAlert(type, msg){
-  alertBox.className = `alert alert-${type}`;
+function showAlert(msg, type = "error"){
   alertBox.textContent = msg;
-  alertBox.classList.remove("d-none");
+  alertBox.classList.remove("hidden");
+  alertBox.classList.toggle("error", type === "error");
 }
+
 function hideAlert(){
-  alertBox.classList.add("d-none");
+  alertBox.classList.add("hidden");
+  alertBox.textContent = "";
+  alertBox.classList.remove("error");
 }
 
-function bytesToSize(bytes){
-  if(!bytes || isNaN(bytes)) return "—";
-  const sizes = ["B","KB","MB","GB"];
-  let i = 0;
-  let num = bytes;
-  while(num >= 1024 && i < sizes.length-1){ num/=1024; i++; }
-  return `${num.toFixed(i===0?0:1)} ${sizes[i]}`;
+function setLoading(on){
+  btn.disabled = on;
+  spinner.classList.toggle("hidden", !on);
+  btnText.textContent = on ? "Loading..." : "Get formats";
 }
 
-function classifyFormat(f){
-  // Works with yt-dlp style fields.
-  const vcodec = (f.vcodec || "").toLowerCase();
-  const acodec = (f.acodec || "").toLowerCase();
-
-  const hasVideo = vcodec && vcodec !== "none";
-  const hasAudio = acodec && acodec !== "none";
-
-  if(hasVideo && hasAudio) return "va";
-  if(hasVideo && !hasAudio) return "v";
-  if(!hasVideo && hasAudio) return "a";
-  return "other";
+function fmtSize(mb){
+  if (mb === null || mb === undefined) return "";
+  return `${mb} MB`;
 }
 
-function applyFilter(){
-  let list = allFormats;
-  if(currentFilter === "va") list = allFormats.filter(f => classifyFormat(f) === "va");
-  if(currentFilter === "v")  list = allFormats.filter(f => classifyFormat(f) === "v");
-  if(currentFilter === "a")  list = allFormats.filter(f => classifyFormat(f) === "a");
+function buildList(groupKey){
+  list.innerHTML = "";
 
-  renderFormats(list);
-}
-
-function renderFormats(list){
-  formatsList.innerHTML = "";
-  countLabel.textContent = `${list.length} items`;
-
-  if(list.length === 0){
-    formatsList.innerHTML = `<div class="format-item">No formats found for this filter.</div>`;
+  const items = (lastData?.groups?.[groupKey] || []);
+  if (!items.length){
+    const div = document.createElement("div");
+    div.className = "alert";
+    div.textContent = "No formats found in this category.";
+    list.appendChild(div);
     return;
   }
 
-  for(const f of list){
-    const fmt = f.format_id ?? f.formatId ?? "";
-    const ext = f.ext ?? "—";
-    const res = f.resolution ?? (f.height ? `${f.height}p` : "—");
-    const fps = f.fps ? `${f.fps}fps` : "—";
-    const vcodec = f.vcodec ?? "—";
-    const acodec = f.acodec ?? "—";
-    const abr = f.abr ? `${Math.round(f.abr)}kbps` : "—";
-    const vbr = f.vbr ? `${Math.round(f.vbr)}kbps` : "—";
-    const size = bytesToSize(f.filesize || f.filesize_approx);
-
-    const kind = classifyFormat(f);
-    const badge =
-      kind === "va" ? "Video+Audio" :
-      kind === "v"  ? "Video Only" :
-      kind === "a"  ? "Audio Only" : "Format";
-
-    const downloadUrl = `/download?url=${encodeURIComponent(lastUrl)}&format_id=${encodeURIComponent(fmt)}`;
-
+  for (const f of items){
     const item = document.createElement("div");
-    item.className = "format-item";
-    item.innerHTML = `
-      <div class="format-top">
-        <div class="fw-bold">${badge} • <span class="text-white-50">${ext.toUpperCase()}</span></div>
-        <a class="btn btn-primary btn-sm px-3" href="${downloadUrl}">Download</a>
-      </div>
-      <div class="kv">
-        <span>Format: ${fmt}</span>
-        <span>Resolution: ${res}</span>
-        <span>FPS: ${fps}</span>
-        <span>Size: ${size}</span>
-        <span>V: ${vcodec}</span>
-        <span>A: ${acodec}</span>
-        <span>VBR: ${vbr}</span>
-        <span>ABR: ${abr}</span>
-      </div>
-    `;
-    formatsList.appendChild(item);
+    item.className = "item";
+
+    const left = document.createElement("div");
+    left.className = "left";
+
+    const label = document.createElement("div");
+    label.className = "label";
+    label.textContent = f.display || f.format_id;
+
+    const small = document.createElement("div");
+    small.className = "small";
+    const sizeTxt = fmtSize(f.filesize_mb);
+    small.textContent = [f.format_id ? `ID: ${f.format_id}` : "", sizeTxt].filter(Boolean).join(" • ");
+
+    left.appendChild(label);
+    left.appendChild(small);
+
+    const a = document.createElement("a");
+    a.className = "dl";
+    a.textContent = "Download";
+    const qUrl = encodeURIComponent(lastData.webpage_url || "");
+    const qFmt = encodeURIComponent(f.format_id || "");
+    a.href = `/download?url=${qUrl}&format_id=${qFmt}&kind=${encodeURIComponent(groupKey)}`;
+
+    item.appendChild(left);
+    item.appendChild(a);
+    list.appendChild(item);
   }
 }
 
-async function getFormats(){
+tabs.forEach(t => {
+  t.addEventListener("click", () => {
+    tabs.forEach(x => x.classList.remove("active"));
+    t.classList.add("active");
+    activeTab = t.dataset.tab;
+    if (lastData) buildList(activeTab);
+  });
+});
+
+btn.addEventListener("click", async () => {
   hideAlert();
-  const url = videoUrl.value.trim();
-  if(!url){
-    showAlert("warning", "Please paste a video URL.");
+  meta.classList.add("hidden");
+  results.classList.add("hidden");
+  list.innerHTML = "";
+  lastData = null;
+
+  const url = urlEl.value.trim();
+  if (!url){
+    showAlert("Please paste a video URL.");
     return;
   }
 
-  btnFormats.disabled = true;
-  btnFormats.textContent = "Loading…";
-
+  setLoading(true);
   try{
-    const res = await fetch("/formats", {
+    const res = await fetch("/api/formats", {
       method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ url })
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({url})
     });
-
     const data = await res.json();
-    if(!res.ok){
-      showAlert("danger", data.error || "Failed to fetch formats.");
+
+    if (!data.ok){
+      showAlert(data.error || "Failed to get formats.");
       return;
     }
 
-    lastUrl = url;
+    lastData = data;
 
-    // Expecting yt-dlp style response (adjust if your backend uses different keys)
-    const title = data.title || "Video";
-    const uploader = data.uploader || data.channel || "";
-    const duration = data.duration ? `${Math.round(data.duration)}s` : "";
-    const webpage = data.webpage_url || url;
-
-    videoTitle.textContent = title;
-    metaLine.textContent = [uploader, duration, webpage].filter(Boolean).join(" • ");
-
-    if(data.thumbnail){
+    // Meta
+    titleEl.textContent = data.title || "Video";
+    openLink.href = data.webpage_url || url;
+    if (data.thumbnail){
       thumb.src = data.thumbnail;
-      thumb.classList.remove("d-none");
-    }else{
-      thumb.classList.add("d-none");
+      thumb.classList.remove("hidden");
+    } else {
+      thumb.classList.add("hidden");
     }
+    meta.classList.remove("hidden");
 
-    allFormats = (data.formats || []).slice();
-
-    // Sort: higher resolution first, then bitrate
-    allFormats.sort((a,b) => {
-      const ah = a.height || 0, bh = b.height || 0;
-      if(bh !== ah) return bh - ah;
-      const av = a.vbr || 0, bv = b.vbr || 0;
-      if(bv !== av) return bv - av;
-      const aa = a.abr || 0, ba = b.abr || 0;
-      return ba - aa;
-    });
-
-    previewCard.classList.remove("d-none");
-    formatsWrap.classList.remove("d-none");
-    currentFilter = "all";
-    applyFilter();
+    // Results
+    results.classList.remove("hidden");
+    buildList(activeTab);
 
   }catch(e){
-    showAlert("danger", "Server error: " + (e?.message || e));
+    showAlert("Network error. Please try again.");
   }finally{
-    btnFormats.disabled = false;
-    btnFormats.textContent = "Get formats";
+    setLoading(false);
   }
-}
-
-function clearAll(){
-  hideAlert();
-  videoUrl.value = "";
-  lastUrl = "";
-  allFormats = [];
-  formatsList.innerHTML = "";
-  formatsWrap.classList.add("d-none");
-  previewCard.classList.add("d-none");
-  thumb.classList.add("d-none");
-  videoTitle.textContent = "—";
-  metaLine.textContent = "—";
-}
-
-btnFormats.addEventListener("click", getFormats);
-videoUrl.addEventListener("keydown", (e) => {
-  if(e.key === "Enter") getFormats();
 });
-
-filterAll.addEventListener("click", ()=>{ currentFilter="all"; applyFilter(); });
-filterVideoAudio.addEventListener("click", ()=>{ currentFilter="va"; applyFilter(); });
-filterVideoOnly.addEventListener("click", ()=>{ currentFilter="v"; applyFilter(); });
-filterAudioOnly.addEventListener("click", ()=>{ currentFilter="a"; applyFilter(); });
-btnClear.addEventListener("click", clearAll);
